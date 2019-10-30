@@ -27,7 +27,13 @@
 #define MYSQL_SERVER_VERSION MARIADB_CLIENT_VERSION_STR
 #endif
 
+#ifndef _MSC_VER
 #include <unistd.h>
+#else
+#define Z_SOLO
+#define strcasecmp _stricmp
+#define localtime_r(x,y) {struct tm* temptime = (y); temptime=localtime((x)); }
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <glib.h>
@@ -48,7 +54,9 @@
 #include "server_detect.h"
 #include "connection.h"
 #include "common.h"
+#ifndef _MSC_VER
 #include "g_unix_signal.h"
+#endif
 #include <math.h>
 #include "getPassword.h"
 
@@ -1187,6 +1195,7 @@ int main(int argc, char *argv[]) {
         tval.tm_mon + 1, tval.tm_mday, tval.tm_hour, tval.tm_min, tval.tm_sec);
 
   create_backup_dir(output_directory);
+#ifndef _MSC_VER
   if (daemon_mode) {
     pid_t pid, sid;
 
@@ -1214,6 +1223,7 @@ int main(int argc, char *argv[]) {
     create_backup_dir(daemon_binlog_directory);
 #endif
   }
+#endif
 #ifdef WITH_BINLOG
   if (need_binlogs) {
     binlog_directory =
@@ -1233,6 +1243,7 @@ int main(int argc, char *argv[]) {
   if (tables_skiplist_file)
     read_tables_skiplist(tables_skiplist_file);
 
+#ifndef WIN32
   if (daemon_mode) {
     GError *terror;
 #ifdef WITH_BINLOG
@@ -1266,7 +1277,9 @@ int main(int argc, char *argv[]) {
     m1 = g_main_loop_new(NULL, TRUE);
     g_main_loop_run(m1);
     g_source_remove(sigsource);
-  } else {
+  } else
+#endif
+  {
     MYSQL *conn = create_main_connection();
     start_dump(conn);
   }
@@ -1341,6 +1354,7 @@ void *exec_thread(void *data) {
 
     // Don't switch the symlink on shutdown because the dump is probably
     // incomplete.
+#ifndef _MSC_VER
     if (!shutdown_triggered) {
       const char *dump_symlink_source = (dump_number == 0) ? "0" : "1";
       char *dump_symlink_dest =
@@ -1357,6 +1371,7 @@ void *exec_thread(void *data) {
 
       dump_number = (dump_number == 1) ? 0 : 1;
     }
+#endif
   }
   return NULL;
 }
@@ -1411,8 +1426,8 @@ void start_dump(MYSQL *conn) {
   char *p3;
   char *u;
 
-  guint64 nits[num_threads];
-  GList *nitl[num_threads];
+  guint64* nits = malloc(sizeof(guint64)*num_threads);
+  GList **nitl = malloc(sizeof(GList*)*num_threads);
   int tn = 0;
   guint64 min = 0;
   time_t t;
@@ -1967,6 +1982,8 @@ void start_dump(MYSQL *conn) {
 
   g_free(td);
   g_free(threads);
+  free(nitl);
+  free(nits);
 }
 
 void dump_create_database(char *database, struct configuration *conf) {
@@ -2037,7 +2054,7 @@ void dump_create_database_data(MYSQL *conn, char *database, char *filename) {
   if (!compress_output)
     fclose((FILE *)outfile);
   else
-    gzclose((gzFile)outfile);
+    gzclose(outfile);
 
   g_string_free(statement, TRUE);
   if (result)
@@ -2887,7 +2904,7 @@ void dump_schema_post_data(MYSQL *conn, char *database, char *filename) {
   if (!compress_output)
     fclose((FILE *)outfile);
   else
-    gzclose((gzFile)outfile);
+    gzclose(outfile);
 
   g_string_free(statement, TRUE);
   g_strfreev(splited_st);
@@ -2967,7 +2984,7 @@ void dump_triggers_data(MYSQL *conn, char *database, char *table,
   if (!compress_output)
     fclose((FILE *)outfile);
   else
-    gzclose((gzFile)outfile);
+    gzclose(outfile);
 
   g_string_free(statement, TRUE);
   g_strfreev(splited_st);
@@ -3048,7 +3065,7 @@ void dump_schema_data(MYSQL *conn, char *database, char *table,
   if (!compress_output)
     fclose((FILE *)outfile);
   else
-    gzclose((gzFile)outfile);
+    gzclose(outfile);
 
   g_string_free(statement, TRUE);
   if (result)
@@ -3167,8 +3184,8 @@ void dump_view_data(MYSQL *conn, char *database, char *table, char *filename,
     fclose((FILE *)outfile);
     fclose((FILE *)outfile2);
   } else {
-    gzclose((gzFile)outfile);
-    gzclose((gzFile)outfile2);
+    gzclose(outfile);
+    gzclose(outfile2);
   }
 
   g_string_free(statement, TRUE);
@@ -3590,7 +3607,7 @@ guint64 dump_table_data(MYSQL *conn, FILE *file, char *database, char *table,
                 fclose((FILE *)file);
                 file = g_fopen(fcfile, "w");
               } else {
-                gzclose((gzFile)file);
+                gzclose(file);
                 file = (void *)gzopen(fcfile, "w");
               }
               st_in_file = 0;
@@ -3669,7 +3686,7 @@ cleanup:
     if (!compress_output) {
       fclose((FILE *)file);
     } else {
-      gzclose((gzFile)file);
+      gzclose(file);
     }
   }
 
@@ -3693,13 +3710,13 @@ cleanup:
 
 gboolean write_data(FILE *file, GString *data) {
   size_t written = 0;
-  ssize_t r = 0;
+  signed long long r = 0;
 
   while (written < data->len) {
     if (!compress_output)
       r = write(fileno(file), data->str + written, data->len);
     else
-      r = gzwrite((gzFile)file, data->str + written, data->len);
+      r = gzwrite(file, data->str + written, data->len);
 
     if (r < 0) {
       g_critical("Couldn't write data to a file: %s", strerror(errno));

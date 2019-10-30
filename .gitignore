@@ -16,3 +16,9 @@ export-*
 mydumper
 myloader
 
+mydumper.dir/
+myloader.dir/
+*.sln
+*.vcxproj*
+Debug/
+.vscode/

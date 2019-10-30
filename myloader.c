@@ -24,7 +24,11 @@
 #define MYSQL_SERVER_VERSION MARIADB_CLIENT_VERSION_STR
 #endif
 
+#ifndef _MSC_VER
 #include <unistd.h>
+#else
+#define Z_SOLO
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <glib.h>
@@ -588,7 +592,7 @@ void restore_data(MYSQL *conn, char *database, char *table,
   if (!is_compressed) {
     fclose(infile);
   } else {
-    gzclose((gzFile)infile);
+    gzclose(infile);
   }
   return;
 }
@@ -608,8 +612,8 @@ gboolean read_data(FILE *file, gboolean is_compressed, GString *data,
         }
       }
     } else {
-      if (!gzgets((gzFile)file, buffer, 256)) {
-        if (gzeof((gzFile)file)) {
+      if (!gzgets(file, buffer, 256)) {
+        if (gzeof(file)) {
           *eof = TRUE;
           buffer[0] = '\0';
         } else {

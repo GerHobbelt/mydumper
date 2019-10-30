@@ -1,4 +1,5 @@
 #define _POSIX_SOURCE
+#ifndef _MSC_VER
 #include <signal.h>
 #include <glib.h>
 
@@ -118,3 +119,4 @@ guint g_unix_signal_add(gint signum, GSourceFunc function, gpointer data) {
   return g_unix_signal_add_full(G_PRIORITY_DEFAULT, signum, function, data,
                                 NULL);
 }
+#endif
