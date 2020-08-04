@@ -241,7 +241,7 @@ FILE *new_binlog_file(char *binlog_file, const char *binlog_dir) {
 		outfile= g_fopen(filename, "w");
 	} else {
 		filename= g_strdup_printf("%s/%s.gz", binlog_dir, binlog_file);
-		outfile= (void*) gzopen(filename, "w");
+		outfile= (void*) gzopen(filename, "w1");
 	}
 	g_free(filename);
 

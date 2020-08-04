@@ -1608,7 +1608,7 @@ void dump_create_database(MYSQL *conn, char *database){
 	if (!compress_output)
 		outfile= g_fopen(filename, "w");
 	else
-		outfile= (void*) gzopen(filename, "w");
+		outfile= (void*) gzopen(filename, "w1");
 
 	if (!outfile) {
 		g_critical("Error: DB: %s Could not create output file %s (%d)", database, filename, errno);
@@ -2251,7 +2251,7 @@ void dump_schema_post_data(MYSQL *conn, char *database, char *filename){
 	if (!compress_output)
 		outfile= g_fopen(filename, "w");
 	else
-		outfile= (void*) gzopen(filename, "w");
+		outfile= (void*) gzopen(filename, "w1");
 
 	if (!outfile) {
 		g_critical("Error: DB: %s Could not create output file %s (%d)", database, filename, errno);
@@ -2411,7 +2411,7 @@ void dump_triggers_data(MYSQL *conn, char *database, char *table, char *filename
 	if (!compress_output)
 		outfile= g_fopen(filename, "w");
 	else
-		outfile= (void*) gzopen(filename, "w");
+		outfile= (void*) gzopen(filename, "w1");
 
 	if (!outfile) {
 		g_critical("Error: DB: %s Could not create output file %s (%d)", database, filename, errno);
@@ -2484,7 +2484,7 @@ void dump_schema_data(MYSQL *conn, char *database, char *table, char *filename) 
 	if (!compress_output)
 		outfile= g_fopen(filename, "w");
 	else
-		outfile= (void*) gzopen(filename, "w");
+		outfile= (void*) gzopen(filename, "w1");
 
 	if (!outfile) {
 		g_critical("Error: DB: %s Could not create output file %s (%d)", database, filename, errno);
@@ -2561,8 +2561,8 @@ void dump_view_data(MYSQL *conn, char *database, char *table, char *filename, ch
 		outfile= g_fopen(filename, "w");
 		outfile2= g_fopen(filename2, "w");
 	}else{
-		outfile= (void*) gzopen(filename, "w");
-		outfile2= (void*) gzopen(filename2, "w");
+		outfile= (void*) gzopen(filename, "w1");
+		outfile2= (void*) gzopen(filename2, "w1");
 	}
 
 	if (!outfile || !outfile2) {
@@ -2665,7 +2665,7 @@ void dump_table_data_file(MYSQL *conn, char *database, char *table, char *where,
 	if (!compress_output)
 		outfile = g_fopen(filename, "w");
 	else
-		outfile = (void*) gzopen(filename, "w");
+		outfile = (void*) gzopen(filename, "w1");
 
 	if (!outfile) {
 		g_critical("Error: DB: %s TABLE: %s Could not create output file %s (%d)", database, table, filename, errno);
@@ -3005,7 +3005,7 @@ guint64 dump_table_data(MYSQL * conn, FILE *file, char *database, char *table, c
 								file = g_fopen(fcfile, "w");
 							} else {
 								gzclose((gzFile)file);
-								file = (void*) gzopen(fcfile, "w");
+								file = (void*) gzopen(fcfile, "w1");
 							}
 							st_in_file = 0;
 						}
