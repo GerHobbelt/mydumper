@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.6)
+cmake_minimum_required(VERSION 2.8.12)
 project(mydumper)
 set(VERSION 0.13.1-1)
 set(ARCHIVE_NAME "${CMAKE_PROJECT_NAME}-${VERSION}")
@@ -10,6 +10,10 @@ find_package(ZLIB)
 find_package(GLIB2)
 find_package(PCRE)
 find_package(OpenSSL)
+
+if (NOT MYSQL_FOUND)
+    MESSAGE(FATAL_ERROR "Could not find MySQL or MariaDB client libraries")
+endif ()
 
 get_cmake_property(_variableNames VARIABLES)
 list (SORT _variableNames)
