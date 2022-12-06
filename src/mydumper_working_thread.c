@@ -14,7 +14,7 @@
 
         Authors:    Domas Mituzas, Facebook ( domas at fb dot com )
                     Mark Leith, Oracle Corporation (mark dot leith at oracle dot com)
-                    Andrew Hutchings, SkySQL (andrew at skysql dot com)
+                    Andrew Hutchings, MariaDB Foundation (andrew at mariadb dot org)
                     Max Bubenick, Percona RDBA (max dot bubenick at percona dot com)
                     David Ducos, Percona (david dot ducos at percona dot com)
 */
@@ -1342,6 +1342,7 @@ struct db_table *new_db_table( MYSQL *conn, struct configuration *conf, struct d
   dbt->max=NULL;
   dbt->chunk_type = UNDEFINED;
   dbt->chunks=NULL;
+  dbt->insert_statement=NULL;
   dbt->chunks_mutex=g_mutex_new();
   dbt->field=get_field_for_dbt(conn,dbt,conf);
   dbt->primary_key = get_primary_key_string(conn, dbt->database->name, dbt->table);
