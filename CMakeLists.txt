@@ -47,13 +47,16 @@ ENDIF()
 
 IF(WITH_ASAN)
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address -fno-omit-frame-pointer)
+#    add_link_options(-fsanitize=address -fno-omit-frame-pointer)
+    set (CMAKE_SHARED_LINKER_FLAGS "-fsanitize=address -fno-omit-frame-pointer")
 ELSEIF(WITH_TSAN)
     add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=thread -fno-omit-frame-pointer)
+#    add_link_options(-fsanitize=thread -fno-omit-frame-pointer)
+    set (CMAKE_SHARED_LINKER_FLAGS "-fsanitize=thread -fno-omit-frame-pointer")
 ELSE()
     add_compile_options(-O3)
-    add_link_options(-O3)
+#    add_link_options(-O3)
+    set (CMAKE_SHARED_LINKER_FLAGS "-O3")
 ENDIF()
 
 if (NOT CMAKE_INSTALL_PREFIX)
@@ -89,8 +92,8 @@ INSTALL(TARGETS mydumper myloader
 )
 
 add_custom_target(dist
-  COMMAND bzr export --root=${ARCHIVE_NAME}
-    ${CMAKE_BINARY_DIR}/${ARCHIVE_NAME}.tar.gz
+  COMMAND git archive --format=tar.gz --prefix=${ARCHIVE_NAME}/
+  -o ${CMAKE_BINARY_DIR}/${ARCHIVE_NAME}.tar.gz HEAD
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 OPTION(RUN_CPPCHECK "Run cppcheck" OFF)
