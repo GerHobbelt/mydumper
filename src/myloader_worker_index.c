@@ -37,7 +37,7 @@
 #include "myloader_worker_index.h"
 
 
-GMutex * innodb_optimize_keys_all_tables_mutex=NULL;
+GRecMutex * innodb_optimize_keys_all_tables_mutex=NULL;
 
 gboolean process_index(struct thread_data * td){
   struct control_job *job=g_async_queue_pop(td->conf->index_queue);
@@ -50,9 +50,9 @@ gboolean process_index(struct thread_data * td){
     g_message("restoring index: %s.%s", dbt->database->name, dbt->table);
     process_job(td, job);
     dbt->finish_time=g_date_time_new_now_local();
-    g_mutex_lock(job->data.restore_job->dbt->mutex);
-    job->data.restore_job->dbt->schema_state=ALL_DONE;
-    g_mutex_unlock(job->data.restore_job->dbt->mutex);
+    g_mutex_lock(dbt->mutex);
+    dbt->schema_state=ALL_DONE;
+    g_mutex_unlock(dbt->mutex);
     g_mutex_lock(index_mutex);
     index_threads_counter--;
     g_mutex_unlock(index_mutex);
@@ -84,15 +84,15 @@ void *worker_index_thread(struct thread_data *td) {
   if (db){
     td->current_database=db;
     if (execute_use(td)){
-      m_critical("Thread %d: Error switching to database `%s` when initializing", td->thread_id, td->current_database);
+      m_critical("I-Thread %d: Error switching to database `%s` when initializing", td->thread_id, td->current_database);
     }
   }
   if (innodb_optimize_keys_all_tables){
-    g_mutex_lock(innodb_optimize_keys_all_tables_mutex);
-    g_mutex_unlock(innodb_optimize_keys_all_tables_mutex);
+    g_rec_mutex_lock(innodb_optimize_keys_all_tables_mutex);
+    g_rec_mutex_unlock(innodb_optimize_keys_all_tables_mutex);
   }
     
-  g_debug("Thread %d: Starting import", td->thread_id);
+  g_debug("I-Thread %d: Starting import", td->thread_id);
   gboolean cont=TRUE;
   while (cont){
     cont=process_index(td);
@@ -109,8 +109,8 @@ void initialize_worker_index(struct configuration *conf){
   init_connection_mutex = g_mutex_new();
   index_threads = g_new(GThread *, max_threads_for_index_creation);
   index_td = g_new(struct thread_data, max_threads_for_index_creation);
-  innodb_optimize_keys_all_tables_mutex=g_mutex_new();
-  g_mutex_lock(innodb_optimize_keys_all_tables_mutex);
+  innodb_optimize_keys_all_tables_mutex=g_rec_mutex_new();
+  g_rec_mutex_lock(innodb_optimize_keys_all_tables_mutex);
   for (n = 0; n < max_threads_for_index_creation; n++) {
     index_td[n].conf = conf;
     index_td[n].thread_id = n + 1;
@@ -127,7 +127,7 @@ void wait_index_worker_to_finish(){
 }
 
 void start_innodb_optimize_keys_all_tables(){
-  g_mutex_unlock(innodb_optimize_keys_all_tables_mutex);
+  g_rec_mutex_unlock(innodb_optimize_keys_all_tables_mutex);
 }
 
 void free_index_worker_threads(){
