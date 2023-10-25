@@ -95,6 +95,10 @@ enum file_type process_filename(char *filename){
         if (!process_schema_view_filename(filename))
           return DO_NOT_ENQUEUE;
         break;
+      case SCHEMA_SEQUENCE:
+        if (!process_schema_sequence_filename(filename))
+          return INCOMPLETE;
+        break;
       case SCHEMA_TRIGGER:
         if (!skip_triggers)
           if (!process_schema_filename(filename,"trigger"))
@@ -113,6 +117,7 @@ enum file_type process_filename(char *filename){
         break;
       case METADATA_GLOBAL:
         process_metadata_global();
+        refresh_table_list(intermediate_conf);
         break;
       case METADATA_TABLE:
         intermediate_conf->metadata_list=g_list_insert(intermediate_conf->metadata_list,filename,-1);
@@ -165,6 +170,7 @@ void process_stream_filename(struct intermediate_filename  * iflnm){
     return;
   }
   if (current_ft != SCHEMA_VIEW &&
+      current_ft != SCHEMA_SEQUENCE &&
       current_ft != SCHEMA_TRIGGER &&
       current_ft != SCHEMA_POST &&
       current_ft != CHECKSUM &&
@@ -174,7 +180,7 @@ void process_stream_filename(struct intermediate_filename  * iflnm){
 //    g_async_queue_push(intermediate_conf->stream_queue, GINT_TO_POINTER(current_ft));
 }
 
-void enqueue_all_index_jobs(struct configuration *conf){
+/*void enqueue_all_index_jobs(struct configuration *conf){
   g_mutex_lock(conf->table_list_mutex);
   GList * iter=conf->table_list;
   struct db_table * dbt;
@@ -191,6 +197,7 @@ void enqueue_all_index_jobs(struct configuration *conf){
   }
   g_mutex_unlock(conf->table_list_mutex);
 }
+*/
 
 void *intermediate_thread(){
   struct intermediate_filename  * iflnm=NULL;
@@ -212,8 +219,8 @@ void *intermediate_thread(){
   for (n = 0; n < num_threads; n++){
 //    g_async_queue_push(intermediate_conf->stream_queue, GINT_TO_POINTER(SHUTDOWN));
   }
-  if (innodb_optimize_keys_all_tables)
-    enqueue_all_index_jobs(intermediate_conf);
+//  if (innodb_optimize_keys_all_tables)
+//    enqueue_all_index_jobs(intermediate_conf);
   g_message("Intermediate thread ended");
   refresh_db_and_jobs(INTERMEDIATE_ENDED);
   return NULL;

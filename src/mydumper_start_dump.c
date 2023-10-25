@@ -92,6 +92,7 @@ int killqueries = 0;
 int lock_all_tables = 0;
 gboolean no_schemas = FALSE;
 gboolean no_locks = FALSE;
+gboolean it_is_a_consistent_backup = FALSE;
 gboolean less_locking = FALSE;
 gboolean no_backup_locks = FALSE;
 gboolean no_ddl_locks = FALSE;
@@ -1028,6 +1029,8 @@ void start_dump() {
     dbt = (struct db_table *)iter->data;
 //    write_table_metadata_into_file(dbt);
     fprintf(mdfile,"\n[`%s`.`%s`]\nRows = %"G_GINT64_FORMAT"\n", dbt->database->name, dbt->table, dbt->rows);
+    if (dbt->data_checksum)
+      fprintf(mdfile,"data_checksum = %s\n", dbt->data_checksum);
     if (dbt->schema_checksum)
       fprintf(mdfile,"schema_checksum = %s\n", dbt->schema_checksum);
     if (dbt->indexes_checksum)
@@ -1105,5 +1108,12 @@ void start_dump() {
 
   free_regex();
   free_common();
+
+  if (no_locks){
+    if (it_is_a_consistent_backup)
+      g_message("This is a consistent backup.");
+    else
+      g_message("This is NOT a consistent backup.");
+  }
 }
 
