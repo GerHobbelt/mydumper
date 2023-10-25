@@ -302,7 +302,9 @@ MYSQL *create_main_connection() {
   set_session = g_string_new(NULL);
   set_global = g_string_new(NULL);
   set_global_back = g_string_new(NULL);
-  detected_server = detect_server(conn);
+//  detected_server = detect_server(conn);
+  detect_server_version(conn);
+  detected_server = get_product(); 
   GHashTable * set_session_hash = mydumper_initialize_hash_of_session_variables();
   GHashTable * set_global_hash = g_hash_table_new ( g_str_hash, g_str_equal );
   if (key_file != NULL ){
@@ -329,6 +331,10 @@ MYSQL *create_main_connection() {
   case SERVER_TYPE_TIDB:
     g_message("Connected to a TiDB server");
     data_checksums=FALSE;
+    break;
+  case SERVER_TYPE_PERCONA:
+    g_message("Connected to a Percona server");
+    set_transaction_isolation_level_repeatable_read(conn);
     break;
   default:
     m_critical("Cannot detect server type");
@@ -510,42 +516,50 @@ void send_flush_table_with_read_lock(MYSQL *conn){
         }
 }
 void determine_ddl_lock_function(MYSQL ** conn, void(**flush_table)(MYSQL *), void (**acquire_lock_function)(MYSQL *), void (** release_lock_function)(MYSQL *), void (** release_binlog_function)(MYSQL *)) {
-  mysql_query(*conn, "SELECT @@version_comment, @@version");
-  MYSQL_RES *res2 = mysql_store_result(*conn);
-  MYSQL_ROW ver;
-  while ((ver = mysql_fetch_row(res2))) {
-    if (g_str_has_prefix(ver[0], "Percona")){
-      if (g_str_has_prefix(ver[1], "8.")) {
-        *acquire_lock_function = &send_lock_instance_backup;
-        *release_lock_function = &send_unlock_instance_backup;
-        break;
+  switch(get_product()){
+    case SERVER_TYPE_PERCONA:
+      switch (get_major()) {
+        case 8:
+          *acquire_lock_function = &send_lock_instance_backup;
+          *release_lock_function = &send_unlock_instance_backup;
+          break;
+        case 5:
+          if (get_secondary() == 7) {
+            *acquire_lock_function = &send_percona57_backup_locks;
+            *release_binlog_function = &send_unlock_binlogs;
+            *release_lock_function = &send_unlock_tables;
+            *conn = create_connection();
+          }
+          break;
+        default:
+          break;
       }
-      if (g_str_has_prefix(ver[1], "5.7.")) {
-        *acquire_lock_function = &send_percona57_backup_locks;
-        *release_binlog_function = &send_unlock_binlogs;
-        *release_lock_function = &send_unlock_tables;
-        *conn = create_connection();
-        break;
+      break;
+    case SERVER_TYPE_MYSQL: 
+      switch (get_major()) {
+        case 8:
+          *acquire_lock_function = &send_lock_instance_backup;
+          *release_lock_function = &send_unlock_instance_backup;
+          break;
+        default:
+          break;
       }
-    }
-    if (g_str_has_prefix(ver[0], "MySQL")){
-      if (g_str_has_prefix(ver[1], "8.")) {
-        *acquire_lock_function = &send_lock_instance_backup;
-        *release_lock_function = &send_unlock_instance_backup;
-        break;
+    case SERVER_TYPE_MARIADB:
+      if (get_major() == 10){
+        switch (get_secondary()){
+          case 5:
+          case 6:
+            *flush_table = NULL;
+            *acquire_lock_function = &send_mariadb_backup_locks;
+            *release_lock_function = &send_backup_stage_end;
+            break;
+          default:
+            break;
+        }
       }
-    }
-    if (g_str_has_prefix(ver[0], "mariadb")){
-      if ((g_str_has_prefix(ver[1], "10.5")) || 
-          (g_str_has_prefix(ver[1], "10.6"))) {
-        *flush_table = NULL;
-        *acquire_lock_function = &send_mariadb_backup_locks;
-        *release_lock_function = &send_backup_stage_end;
-        break;
-      }
-    }
+    default:
+      break;
   }
-  mysql_free_result(res2);
 }
 
 
@@ -692,14 +706,14 @@ void start_dump() {
   check_num_threads();
 
   initialize_regex(partition_regex);
-
+//  detect_server_version(conn);
   MYSQL *conn = create_main_connection();
   main_connection = conn;
   MYSQL *second_conn = conn;
   struct configuration conf = {1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0};
   char *metadata_partial_filename, *metadata_filename;
   char *u;
-  detect_server_version(conn);
+//  detect_server_version(conn);
   void (*flush_table_function)(MYSQL *) = &send_flush_table_with_read_lock;
   void (*acquire_ddl_lock_function)(MYSQL *) = NULL;
   void (*release_ddl_lock_function)(MYSQL *) = NULL;
