@@ -795,7 +795,9 @@ commands:
         default: ""
         type: string
     steps:
-    - run: source /etc/profile.d/sh.local || true
+    - run:
+        command: |
+          source /etc/profile.d/sh.local || true
     - run: cmake . <<parameters.CMAKED>>
     - run: make
     - run: sudo make install
@@ -824,6 +826,7 @@ commands:
         command: |
           echo 'export MYDUMPER_VERSION=$(  echo "${CIRCLE_TAG:1}" | cut -d'-' -f1 ) ' >> "$BASH_ENV"
           echo 'export MYDUMPER_REVISION=$( echo "${CIRCLE_TAG:1}" | cut -d'-' -f2 ) ' >> "$BASH_ENV"
+          cat /etc/profile.d/sh.local >> "$BASH_ENV" || true
           source "$BASH_ENV"
 jobs:
 
@@ -2055,13 +2058,13 @@ workflows:
         test: true
         e: jammy_mariadb1011
 
-    - build_bionic_percona57_amd64:
+    - build_bionic_percona80_amd64:
         filters:
           branches:
             ignore: /.*/
           tags:
             only: /^v\d+\.\d+\.\d+-\d+$/
-    - build_focal_percona57_amd64:
+    - build_focal_percona80_amd64:
         filters:
           branches:
             ignore: /.*/
@@ -2097,7 +2100,7 @@ workflows:
             ignore: /.*/
           tags:
             only: /^v\d+\.\d+\.\d+-\d+$/
-    - build_buster_percona57_amd64:
+    - build_buster_percona80_amd64:
         filters:
           branches:
             ignore: /.*/
@@ -2105,14 +2108,14 @@ workflows:
             only: /^v\d+\.\d+\.\d+-\d+$/
     - publish-github-release:
         requires:
-          - build_bionic_percona57_amd64
-          - build_focal_percona57_amd64
+          - build_bionic_percona80_amd64
+          - build_focal_percona80_amd64
           - build_jammy_percona80_amd64
           - build_el7_percona57_x86_64
           - build_el8_percona57_x86_64
           - build_el9_percona80_x86_64
           - build_bullseye_percona80_amd64
-          - build_buster_percona57_amd64
+          - build_buster_percona80_amd64
         filters:
           branches:
             ignore: /.*/
