@@ -83,10 +83,13 @@ gboolean reconnect = 1;
 void configure_connection(MYSQL *conn, const char *name) {
   if (connection_defaults_file != NULL) {
     mysql_options(conn, MYSQL_READ_DEFAULT_FILE, connection_defaults_file);
+    mysql_options(conn, MYSQL_READ_DEFAULT_GROUP, name);
   }
-  mysql_options(conn, MYSQL_READ_DEFAULT_GROUP, name);
   mysql_options(conn, MYSQL_OPT_LOCAL_INFILE, NULL);
   mysql_options(conn, MYSQL_OPT_RECONNECT, &reconnect);
+
+  mysql_options4(conn, MYSQL_OPT_CONNECT_ATTR_ADD, "program_name", name);
+  mysql_options4(conn, MYSQL_OPT_CONNECT_ATTR_ADD, "app_version", g_strdup_printf("Release %s", VERSION));
 
   if (compress_protocol)
     mysql_options(conn, MYSQL_OPT_COMPRESS, NULL);
