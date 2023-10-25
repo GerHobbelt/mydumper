@@ -34,21 +34,12 @@ jobs:
         with:
           images: mydumper/mydumper
       
-      - name: Build and push Docker image GZIP
+      - name: Build and push Docker image ZSTD
         uses: docker/build-push-action@v4
         with:
+          build-args: CMAKE_ARGS=-DWITH_ZSTD=ON
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Build and push Docker image ZSTD
-        uses: docker/build-push-action@v4
-        with:
-          build-args: CMAKE_ARGS='-DWITH_ZSTD=ON'
-          context: .
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}-zstd
-          labels: ${{ steps.meta.outputs.labels }}-zstd
