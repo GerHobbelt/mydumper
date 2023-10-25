@@ -111,7 +111,7 @@ gchar **db_items=NULL;
 //GRecMutex *ready_database_dump_mutex = NULL;
 GRecMutex *ready_table_dump_mutex = NULL;
 
-struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL};
+struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL, NULL, NULL};
 gchar *exec_command=NULL;
 
 void initialize_start_dump(){
@@ -121,6 +121,9 @@ void initialize_start_dump(){
   conf_per_table.all_where_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
   conf_per_table.all_limit_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
   conf_per_table.all_num_threads_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
+
+  conf_per_table.all_columns_on_select_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
+  conf_per_table.all_columns_on_insert_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
 
   // until we have an unique option on lock types we need to ensure this
   if (no_locks || trx_consistency_only)
@@ -888,8 +891,8 @@ void start_dump() {
     guint i=0;
     for (i=0;i<g_strv_length(db_items);i++){
       struct database *this_db=new_database(conn,db_items[i],TRUE);
-      if (this_db->dump_triggers)
-        create_job_to_dump_schema_triggers(this_db, &conf);
+//      if (this_db->dump_triggers)
+//        create_job_to_dump_schema_triggers(this_db, &conf);
       create_job_to_dump_database(this_db, &conf);
       if (!no_schemas)
         create_job_to_dump_schema(this_db, &conf);
