@@ -12,32 +12,10 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-    Authors:        Andrew Hutchings, MariaDB Foundation (andrew at mariadb dot org)
+        Authors:    David Ducos, Percona (david dot ducos at percona dot com)
 */
-#ifndef _server_detect_h
-#define _server_detect_h
+#include "myloader.h"
 
-#include <mysql.h>
-
-#define DETECT_MYSQL_REGEX "^([3-9]\\.[0-9]+\\.[0-9]+)"
-#define DETECT_MARIADB_REGEX "^([0-9]{1,2}\\.[0-9]+\\.[0-9]+)"
-#define DETECT_TIDB_REGEX "TiDB"
-
-enum server_type {
-  SERVER_TYPE_UNKNOWN,
-  SERVER_TYPE_MYSQL,
-  SERVER_TYPE_TIDB,
-  SERVER_TYPE_MARIADB,
-  SERVER_TYPE_PERCONA
-};
-void detect_server_version(MYSQL * conn);
-int get_product();
-int get_major();
-int get_secondary();
-int get_revision();
-gboolean is_mysql_like();
-const gchar * get_product_name();
-#endif
-
-
-
+void initialize_post_loding_threads(struct configuration *conf);
+void create_post_shutdown_job(struct configuration *conf);
+void wait_post_worker_to_finish();

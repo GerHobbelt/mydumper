@@ -397,7 +397,7 @@ void write_view_definition_into_file(MYSQL *conn, struct db_table *dbt, char *fi
     return;
   }
 
-  if ((detected_server == SERVER_TYPE_MYSQL || detected_server == SERVER_TYPE_MARIADB) && set_names_statement) {
+  if (is_mysql_like() && set_names_statement) {
     g_string_printf(statement,"%s;\n",set_names_statement);
   }
 
@@ -468,7 +468,7 @@ void write_view_definition_into_file(MYSQL *conn, struct db_table *dbt, char *fi
     return;
   }
 
-  if ((detected_server == SERVER_TYPE_MYSQL || detected_server == SERVER_TYPE_MARIADB) && set_names_statement) {
+  if (is_mysql_like() && set_names_statement) {
     g_string_printf(statement,"%s;\n",set_names_statement);
   }
 
@@ -944,7 +944,7 @@ void create_job_to_dump_metadata(struct configuration *conf, FILE *mdfile){
   struct job *j = g_new0(struct job, 1);
   j->job_data = (void *)mdfile;
   j->type = JOB_WRITE_MASTER_STATUS;
-  g_async_queue_push(conf->schema_queue, j);
+  g_async_queue_push(conf->initial_queue, j);
 }
 
 void create_job_to_dump_tablespaces(struct configuration *conf){
