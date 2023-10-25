@@ -39,6 +39,8 @@ struct database * new_database(MYSQL *conn, char *database_name, gboolean alread
   d->escaped = escape_string(conn,d->name);
   d->already_dumped = already_dumped;
   d->ad_mutex=g_mutex_new();
+  d->schema_checksum=NULL;
+  d->post_checksum=NULL;
   g_hash_table_insert(database_hash, d->name,d);
   return d;
 }
@@ -72,4 +74,17 @@ gboolean get_database(MYSQL *conn, char *database_name, struct database ** datab
   return FALSE;
 }
 
+void write_database_on_disk(FILE *mdfile){
+  GHashTableIter iter;
+  gchar * lkey;
+  g_hash_table_iter_init ( &iter, database_hash);
+  struct database *d=NULL;
+  while ( g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &d ) ) {
+    if (d->schema_checksum != NULL || d->post_checksum != NULL){
+      fprintf(mdfile, "\n[`%s`]\n%s = %s\n%s = %s\n", d->name, 
+        d->schema_checksum!=NULL?"schema_checksum":"", d->schema_checksum!=NULL?d->schema_checksum:"", 
+        d->post_checksum  !=NULL?"post_checksum":"",   d->post_checksum  !=NULL?d->post_checksum:"");
+    }
+  }
+}
 

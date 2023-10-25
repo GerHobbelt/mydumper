@@ -25,34 +25,29 @@
 #include "myloader_restore.h"
 #include <glib-unix.h>
 
+unsigned long long int total_data_sql_files = 0;
+#include "myloader_global.h"
 #include "myloader_common.h"
 #include "myloader_control_job.h"
-extern gboolean intermediate_queue_ended;
-extern gboolean serial_tbl_creation;
-extern gboolean overwrite_tables;
-extern gchar *db;
-extern gboolean stream;
-extern guint num_threads;
 gboolean shutdown_triggered=FALSE;
 GAsyncQueue *file_list_to_do=NULL;
 static GMutex *progress_mutex = NULL;
 static GMutex *single_threaded_create_table = NULL;
 unsigned long long int progress = 0;
-unsigned long long int total_data_sql_files = 0;
 enum purge_mode purge_mode;
 
-void initialize_restore_job(gchar * purge_mode_str){
+void initialize_restore_job(gchar * pm_str){
   file_list_to_do = g_async_queue_new();
   single_threaded_create_table = g_mutex_new();
   progress_mutex = g_mutex_new();
-  if (purge_mode_str){
-    if (!strcmp(purge_mode_str,"TRUNCATE")){
+  if (pm_str){
+    if (!strcmp(pm_str,"TRUNCATE")){
       purge_mode=TRUNCATE;
-    } else if (!strcmp(purge_mode_str,"DROP")){
+    } else if (!strcmp(pm_str,"DROP")){
       purge_mode=DROP;
-    } else if (!strcmp(purge_mode_str,"DELETE")){
+    } else if (!strcmp(pm_str,"DELETE")){
       purge_mode=DELETE;
-    } else if (!strcmp(purge_mode_str,"NONE")){
+    } else if (!strcmp(pm_str,"NONE")){
       purge_mode=NONE;
     } else {
       m_error("Purge mode unknown");
@@ -121,21 +116,23 @@ int overwrite_table(MYSQL *conn,gchar * database, gchar * table){
               database, table);
     query = g_strdup_printf("DROP TABLE IF EXISTS `%s`.`%s`",
                             database, table);
-    mysql_query(conn, query);
+    m_query(conn, query, m_critical, "Drop table failed");
+//    mysql_query(conn, query);
     g_free(query);
     query = g_strdup_printf("DROP VIEW IF EXISTS `%s`.`%s`", database,
                             table);
-    mysql_query(conn, query);
+    m_query(conn, query, m_critical, "Drop view failed");
+//    mysql_query(conn, query);
   } else if (purge_mode == TRUNCATE) {
     g_message("Truncating table `%s`.`%s`", database, table);
     query= g_strdup_printf("TRUNCATE TABLE `%s`.`%s`", database, table);
-    truncate_or_delete_failed= mysql_query(conn, query);
+    truncate_or_delete_failed= m_query(conn, query, m_warning, "TRUNCATE TABLE failed");
     if (truncate_or_delete_failed)
       g_warning("Truncate failed, we are going to try to create table or view");
   } else if (purge_mode == DELETE) {
     g_message("Deleting content of table `%s`.`%s`", database, table);
     query= g_strdup_printf("DELETE FROM `%s`.`%s`", database, table);
-    truncate_or_delete_failed= mysql_query(conn, query);
+    truncate_or_delete_failed= m_query(conn, query, m_warning, "DELETE failed");
     if (truncate_or_delete_failed)
       g_warning("Delete failed, we are going to try to create table or view");
   }

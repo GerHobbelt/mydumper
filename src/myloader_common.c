@@ -36,16 +36,8 @@
 #include "tables_skiplist.h"
 #include "regex.h"
 #include <errno.h>
+#include "myloader_global.h"
 
-extern gchar *compress_extension;
-extern gchar *db;
-extern gboolean no_delete;
-extern gboolean stream;
-extern gboolean resume;
-extern char **tables;
-extern gchar *tables_skiplist_file;
-extern guint errors;
-extern gchar *directory;
 
 static GMutex *db_hash_mutex = NULL;
 GHashTable *db_hash=NULL;
@@ -143,6 +135,21 @@ void execute_use_if_needs_to(struct thread_data *td, gchar *database, const gcha
     }
   }
 }
+
+
+gboolean m_query(  MYSQL *conn, const gchar *query, void log_fun(const char *, ...) , const char *fmt, ...){
+  if (mysql_query(conn, query)){
+    va_list    args;
+    va_start(args, fmt);
+    gchar *c=g_strdup_vprintf(fmt,args);
+    log_fun("%s: %s",c, mysql_error(conn));
+    g_free(c);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+
 
 enum file_type get_file_type (const char * filename){
   if (m_filename_has_suffix(filename, "-schema.sql")) {

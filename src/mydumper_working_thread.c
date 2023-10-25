@@ -71,6 +71,7 @@
 #include "mydumper_jobs.h"
 #include "mydumper_chunks.h"
 #include "mydumper_write.h"
+#include "mydumper_global.h"
 
 /* Some earlier versions of MySQL do not yet define MYSQL_TYPE_JSON */
 #ifndef MYSQL_TYPE_JSON
@@ -79,30 +80,8 @@
 
 GMutex *init_mutex = NULL;
 /* Program options */
-extern guint updated_since;
-extern gboolean no_locks;
-extern guint complete_insert;
-extern gboolean dump_tablespaces;
 guint rows_per_file = 0;
 gboolean use_savepoints = FALSE;
-extern gboolean load_data;
-extern struct function_pointer pp;
-extern gboolean dump_triggers;
-extern GAsyncQueue *stream_queue;
-extern gboolean stream;
-extern int detected_server;
-extern gboolean no_data;
-extern FILE * (*m_open)(const char *filename, const char *);
-extern int (*m_close)(void *file);
-extern int (*m_write)(FILE * file, const char * buff, int len);
-extern gchar *compress_extension;
-extern gchar *db;
-extern GString *set_session;
-extern guint num_threads;
-extern char **tables;
-extern gchar *tables_skiplist_file;
-extern GMutex *ready_database_dump_mutex;
-extern GHashTable *all_where_per_table;
 gint database_counter = 0;
 //gint table_counter = 0;
 gchar *ignore_engines = NULL;
@@ -110,40 +89,23 @@ gchar *binlog_snapshot_gtid_executed = NULL;
 gboolean binlog_snapshot_gtid_executed_status = FALSE;
 guint binlog_snapshot_gtid_executed_count = 0;
 char **ignore = NULL;
-extern gchar *tidb_snapshot;
-extern GList *no_updated_tables;
 int skip_tz = 0;
-extern int need_dummy_read;
-extern int need_dummy_toku_read;
-extern int compress_output;
 int sync_wait = -1;
-extern gboolean ignore_generated_fields;
-extern gboolean no_schemas;
 gboolean dump_events = FALSE;
 gboolean dump_routines = FALSE;
 gboolean no_dump_views = FALSE;
 gboolean views_as_tables=FALSE;
-extern gboolean less_locking;
 gboolean success_on_1146 = FALSE;
 
 GList  *innodb_table = NULL;
 GMutex *innodb_table_mutex = NULL;
 GList  *non_innodb_table = NULL;
 GMutex *non_innodb_table_mutex = NULL;
-extern GList *table_schemas;
 GMutex *table_schemas_mutex = NULL;
-extern GList *trigger_schemas;
+GMutex *all_dbts_mutex=NULL;
 GMutex *trigger_schemas_mutex = NULL;
-extern GList *view_schemas;
 GMutex *view_schemas_mutex = NULL;
-extern GList *schema_post;
-extern gint non_innodb_done;
 guint less_locking_threads = 0;
-extern guint trx_consistency_only;
-extern gchar *set_names_statement;
-
-extern struct configuration_per_table conf_per_table;
-
 GHashTable *character_set_hash=NULL;
 GMutex *character_set_hash_mutex = NULL;
 
@@ -153,12 +115,7 @@ gboolean schema_checksums = FALSE;
 gboolean routine_checksums = FALSE;
 gboolean exit_if_broken_table_found = FALSE;
 // For daemon mode
-extern guint dump_number;
-extern gboolean shutdown_triggered;
-extern GAsyncQueue *start_scheduled_dump;
 GCond *ll_cond = NULL;
-
-extern guint errors;
 int build_empty_files = 0;
 gchar *where_option=NULL;
 GMutex *consistent_snapshot = NULL;
@@ -166,81 +123,11 @@ GMutex *consistent_snapshot_token_I = NULL;
 GMutex *consistent_snapshot_token_II = NULL;
 gchar *rows_per_chunk=NULL;
 
-static GOptionEntry checksum_entries[] = {
-    {"checksum-all", 'M', 0, G_OPTION_ARG_NONE, &dump_checksums,
-     "Dump checksums for all elements", NULL},
-    {"data-checksums", 0, 0, G_OPTION_ARG_NONE, &data_checksums,
-     "Dump table checksums with the data", NULL},
-    {"schema-checksums", 0, 0, G_OPTION_ARG_NONE, &schema_checksums,
-     "Dump schema table and view creation checksums", NULL},
-    {"routine-checksums", 0, 0, G_OPTION_ARG_NONE, &routine_checksums,
-     "Dump triggers, functions and routines checksums", NULL},
-    {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
-
-static GOptionEntry working_thread_entries[] = {
-    {"exit-if-broken-table-found", 0, 0, G_OPTION_ARG_NONE, &exit_if_broken_table_found,
-      "Exits if a broken table has been found", NULL},
-    {"success-on-1146", 0, 0, G_OPTION_ARG_NONE, &success_on_1146,
-     "Not increment error count and Warning instead of Critical in case of "
-     "table doesn't exist",
-     NULL},
-    {"build-empty-files", 'e', 0, G_OPTION_ARG_NONE, &build_empty_files,
-     "Build dump files even if no data available from table", NULL},
-    {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
-
-static GOptionEntry filter_worker_entries[] = {
-    {"ignore-engines", 'i', 0, G_OPTION_ARG_STRING, &ignore_engines,
-     "Comma delimited list of storage engines to ignore", NULL},
-    { "where", 0, 0, G_OPTION_ARG_STRING, &where_option,
-      "Dump only selected records.", NULL },
-    {"updated-since", 'U', 0, G_OPTION_ARG_INT, &updated_since,
-     "Use Update_time to dump only tables updated in the last U days", NULL},
-    {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
-
-static GOptionEntry objects_entries[] = {
-    {"no-schemas", 'm', 0, G_OPTION_ARG_NONE, &no_schemas,
-      "Do not dump table schemas with the data and triggers", NULL},
-    {"all-tablespaces", 'Y', 0 , G_OPTION_ARG_NONE, &dump_tablespaces,
-    "Dump all the tablespaces.", NULL},
-    {"no-data", 'd', 0, G_OPTION_ARG_NONE, &no_data, "Do not dump table data",
-     NULL},
-    {"triggers", 'G', 0, G_OPTION_ARG_NONE, &dump_triggers, "Dump triggers. By default, it do not dump triggers",
-     NULL},
-    {"events", 'E', 0, G_OPTION_ARG_NONE, &dump_events, "Dump events. By default, it do not dump events", NULL},
-    {"routines", 'R', 0, G_OPTION_ARG_NONE, &dump_routines,
-     "Dump stored procedures and functions. By default, it do not dump stored procedures nor functions", NULL},
-    {"views-as-tables", 0, 0, G_OPTION_ARG_NONE, &views_as_tables, "Export VIEWs as they were tables",
-     NULL},
-    {"no-views", 'W', 0, G_OPTION_ARG_NONE, &no_dump_views, "Do not dump VIEWs",
-     NULL},
-    {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
-
-
 void dump_database_thread(MYSQL *, struct configuration*, struct database *);
 gchar *get_primary_key_string(MYSQL *conn, char *database, char *table);
 guint64 estimate_count(MYSQL *conn, char *database, char *table, char *field,
                        char *from, char *to);
 void write_table_job_into_file(MYSQL *conn, struct table_job * tj);
-
-void load_working_thread_entries(GOptionContext *context, GOptionGroup *extra_group, GOptionGroup * filter_group){
-
-  g_option_group_add_entries(extra_group, working_thread_entries);
-
-
-  GOptionGroup *checksum_group=g_option_group_new("checksum", "Checksum Options", "Checksum Options", NULL, NULL);
-  g_option_group_add_entries(checksum_group, checksum_entries);
-  g_option_context_add_group(context, checksum_group);
-
-  GOptionGroup *objects_group=g_option_group_new("objects", "Objects Options", "Objects Options", NULL, NULL);
-  g_option_group_add_entries(objects_group, objects_entries);
-  g_option_context_add_group(context, objects_group);
-
-  g_option_group_add_entries(filter_group, filter_worker_entries);
-
-//  g_option_context_add_group(context, main_group);
-
-}
-
 
 guint min_rows_per_file = 0;
 guint max_rows_per_file = 0;
@@ -273,7 +160,7 @@ void parse_rows_per_chunk(){
 
 
 void initialize_working_thread(){
-
+  database_counter = 0;
   if (rows_per_chunk)
     parse_rows_per_chunk();
   else {
@@ -288,6 +175,7 @@ void initialize_working_thread(){
   table_schemas_mutex = g_mutex_new();
   trigger_schemas_mutex = g_mutex_new();
   innodb_table_mutex = g_mutex_new();
+  all_dbts_mutex = g_mutex_new();
   init_mutex = g_mutex_new();
   ll_cond = g_cond_new();
   consistent_snapshot = g_mutex_new();
@@ -295,6 +183,7 @@ void initialize_working_thread(){
   consistent_snapshot_token_I = g_mutex_new();
   consistent_snapshot_token_II = g_mutex_new();
   g_mutex_lock(consistent_snapshot_token_II);
+  binlog_snapshot_gtid_executed = NULL;
   if (less_locking)
     less_locking_threads = num_threads;
   initialize_jobs();
@@ -351,6 +240,8 @@ void finalize_working_thread(){
   g_mutex_free(consistent_snapshot_token_I);
   g_mutex_unlock(consistent_snapshot_token_II);
   g_mutex_free(consistent_snapshot_token_II);
+  if (binlog_snapshot_gtid_executed!=NULL)
+    g_free(binlog_snapshot_gtid_executed);
 }
 
 
@@ -399,7 +290,7 @@ void thd_JOB_DUMP_ALL_DATABASES( struct thread_data *td, struct job *job){
     if (get_database(td->thrconn,row[0],&db_tmp) && !no_schemas && (eval_regex(row[0], NULL))){
       g_mutex_lock(db_tmp->ad_mutex);
       if (!db_tmp->already_dumped){
-        create_job_to_dump_schema(db_tmp->name, td->conf);
+        create_job_to_dump_schema(db_tmp, td->conf);
         db_tmp->already_dumped=TRUE;
       }
       g_mutex_unlock(db_tmp->ad_mutex);
@@ -460,7 +351,7 @@ void get_table_info_to_process_from_list(MYSQL *conn, struct configuration *conf
       if (!database->already_dumped){
         g_mutex_lock(database->ad_mutex);
         if (!database->already_dumped){
-          create_job_to_dump_schema(database->name, conf);
+          create_job_to_dump_schema(database, conf);
           database->already_dumped=TRUE;
         }
         g_mutex_unlock(database->ad_mutex);
@@ -753,6 +644,8 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
   char *slavelog = NULL;
   char *slavepos = NULL;
   char *slavegtid = NULL;
+  char *channel_name = NULL;
+  const char *gtid_title = NULL;
   guint isms;
   guint i;
 
@@ -778,7 +671,7 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
   }
 
   if (masterlog) {
-    fprintf(file, "SHOW MASTER STATUS:\n\tLog: %s\n\tPos: %s\n\tGTID:%s\n\n",
+    fprintf(file, "[master]\nFile = %s\nPosition = %s\nExecuted_Gtid_Set = %s\n\n",
             masterlog, masterpos, mastergtid);
     g_message("Written master status");
   }
@@ -801,6 +694,13 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
   slave = mysql_store_result(conn);
   while (slave && (row = mysql_fetch_row(slave))) {
     fields = mysql_fetch_fields(slave);
+    connname=NULL;
+    slavepos=NULL;
+    slavelog=NULL;
+    slavehost=NULL;
+    slavegtid=NULL;
+    channel_name=NULL;
+    gtid_title=NULL;
     for (i = 0; i < mysql_num_fields(slave); i++) {
       if (isms && !strcasecmp("connection_name", fields[i].name))
         connname = row[i];
@@ -810,18 +710,23 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
         slavelog = row[i];
       } else if (!strcasecmp("master_host", fields[i].name)) {
         slavehost = row[i];
-      } else if (!strcasecmp("Executed_Gtid_Set", fields[i].name) ||
-                 !strcasecmp("Gtid_Slave_Pos", fields[i].name)) {
+      } else if (!strcasecmp("Executed_Gtid_Set", fields[i].name)){
+        gtid_title="Executed_Gtid_Set";  
         slavegtid = row[i];
+      } else if (!strcasecmp("Gtid_Slave_Pos", fields[i].name)) {
+        gtid_title="Gtid_Slave_Pos";
+        slavegtid = row[i];
+      } else if (!strcasecmp("Channel_Name", fields[i].name) && strlen(row[i]) > 1) {
+        channel_name = row[i];
       }
     }
     if (slavehost) {
       slave_count++;
-      fprintf(file, "SHOW SLAVE STATUS:");
+      fprintf(file, "[replication%s%s]", channel_name!=NULL?".":"", channel_name!=NULL?channel_name:"");
       if (isms)
         fprintf(file, "\n\tConnection name: %s", connname);
-      fprintf(file, "\n\tHost: %s\n\tLog: %s\n\tPos: %s\n\tGTID:%s\n\n",
-              slavehost, slavelog, slavepos, slavegtid);
+      fprintf(file, "\n\aster_host = %s\nrelay_master_log_file = %s\nexec_master_log_pos = %s\n%s = %s\n\n",
+              slavehost, slavelog, slavepos, gtid_title, slavegtid);
       g_message("Written slave status");
     }
   }
@@ -1185,6 +1090,7 @@ void *working_thread(struct thread_data *td) {
   process_queue(td->conf->initial_queue,td, process_job_builder_job, NULL);
 
   g_async_queue_push(td->conf->ready, GINT_TO_POINTER(1));
+  g_message("Thread %d: Schema queue", td->thread_id);
   process_queue(td->conf->schema_queue,td, process_job, NULL);
 
   if (!no_data){
@@ -1379,7 +1285,10 @@ struct db_table *new_db_table( MYSQL *conn, struct configuration *conf, struct d
   } else {
     dbt->select_fields = g_string_new("*");
   }
-
+  dbt->indexes_checksum=NULL;
+  dbt->data_checksum=NULL;
+  dbt->schema_checksum=NULL;
+  dbt->triggers_checksum=NULL;
   dbt->rows=0;
   if (!datalength)
     dbt->datalength = 0;
@@ -1405,12 +1314,15 @@ void new_table_to_dump(MYSQL *conn, struct configuration *conf, gboolean is_view
     /* Green light! */
   g_mutex_lock(database->ad_mutex);
   if (!database->already_dumped){
-    create_job_to_dump_schema(database->name, conf);
+    create_job_to_dump_schema(database, conf);
     database->already_dumped=TRUE;
   }
   g_mutex_unlock(database->ad_mutex);
 
   struct db_table *dbt = new_db_table( conn, conf, database, table, collation, datalength);
+  g_mutex_lock(all_dbts_mutex);
+  all_dbts=g_list_prepend( all_dbts, dbt) ;
+  g_mutex_unlock(all_dbts_mutex);
 
  // if is a view we care only about schema
   if (!is_view || views_as_tables) {

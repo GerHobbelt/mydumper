@@ -29,14 +29,8 @@
 #include "myloader.h"
 #include "myloader_jobs_manager.h"
 #include "myloader_common.h"
-extern guint errors;
-extern guint commit_count;
-extern gchar *directory;
-extern gchar *compress_extension;
-extern guint rows;
+#include "myloader_global.h"
 gboolean skip_definer = FALSE;
-extern GMutex *load_data_list_mutex;
-extern GHashTable * load_data_list;
 int restore_data_in_gstring_by_statement(struct thread_data *td, GString *data, gboolean is_schema, guint *query_counter)
 {
   if (mysql_real_query(td->thrconn, data->str, data->len)) {
@@ -61,11 +55,11 @@ int restore_data_in_gstring_by_statement(struct thread_data *td, GString *data, 
     if (commit_count > 1) {
       if (*query_counter == commit_count) {
         *query_counter= 0;
-        if (mysql_query(td->thrconn, "COMMIT")) {
+        if (m_query(td->thrconn, "COMMIT", m_warning, "COMMIT failed")) {
           errors++;
           return 2;
         }
-        mysql_query(td->thrconn, "START TRANSACTION");
+        m_query(td->thrconn, "START TRANSACTION", m_warning, "START TRANSACTION failed");
       }
     }
   }
@@ -223,7 +217,7 @@ int restore_data_from_file(struct thread_data *td, char *database, char *table,
     return 1;
   }
   if (!is_schema && (commit_count > 1) )
-    mysql_query(td->thrconn, "START TRANSACTION");
+    m_query(td->thrconn, "START TRANSACTION", m_warning, "START TRANSACTION failed");
   guint tr=0;
   while (eof == FALSE) {
     if (read_data(infile, is_compressed, data, &eof, &line)) {
@@ -267,7 +261,7 @@ int restore_data_from_file(struct thread_data *td, char *database, char *table,
       return r;
     }
   }
-  if (!is_schema && (commit_count > 1) && mysql_query(td->thrconn, "COMMIT")) {
+  if (!is_schema && (commit_count > 1) && m_query(td->thrconn, "COMMIT", m_warning, "COMMIT failed")) {
     g_critical("Error committing data for %s.%s from file %s: %s",
                database, table, filename, mysql_error(td->thrconn));
     errors++;
