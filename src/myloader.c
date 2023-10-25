@@ -34,11 +34,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <errno.h>
-#ifdef ZWRAP_USE_ZSTD
-#include "../zstd/zstd_zlibwrapper.h"
-#else
-#include <zlib.h>
-#endif
 #include "config.h"
 #include "common.h"
 #include "myloader_stream.h"
@@ -151,11 +146,11 @@ void create_database(struct thread_data *td, gchar *database) {
   const gchar *filename =
       g_strdup_printf("%s-schema-create.sql", database);
   const gchar *filenamegz =
-      g_strdup_printf("%s-schema-create.sql%s", database, compress_extension);
+      g_strdup_printf("%s-schema-create.sql%s", database, exec_per_thread_extension);
   const gchar *filepath = g_strdup_printf("%s/%s-schema-create.sql",
                                           directory, database);
   const gchar *filepathgz = g_strdup_printf("%s/%s-schema-create.sql%s",
-                                            directory, database, compress_extension);
+                                            directory, database, exec_per_thread_extension);
 
   if (g_file_test(filepath, G_FILE_TEST_EXISTS)) {
     g_atomic_int_add(&(detailed_errors.schema_errors), restore_data_from_file(td, database, NULL, filename, TRUE));
@@ -211,6 +206,8 @@ int main(int argc, char *argv[]) {
   setlocale(LC_ALL, "");
   g_thread_init(NULL);
 
+  signal(SIGCHLD, SIG_IGN);
+
   if (db == NULL && source_db != NULL) {
     db = g_strdup(source_db);
   }
@@ -247,11 +244,6 @@ int main(int argc, char *argv[]) {
     exit(EXIT_SUCCESS);
   }
 
-#ifdef ZWRAP_USE_ZSTD
-  compress_extension = g_strdup(".zst");
-#else
-  compress_extension = g_strdup(".gz");
-#endif
   initialize_set_names();
 
 
@@ -441,7 +433,6 @@ int main(int argc, char *argv[]) {
 
   g_async_queue_unref(conf.data_queue);
   conf.data_queue=NULL;
-  checksum_databases(&t);
 
   GList * tl=conf.table_list;
   while (tl != NULL){
