@@ -23,7 +23,7 @@
 #include "common.h"
 #include <errno.h>
 #include "myloader.h"
-#include "myloader_jobs_manager.h"
+//#include "myloader_jobs_manager.h"
 #include "myloader_common.h"
 #include "myloader_global.h"
 #include "connection.h"
@@ -32,6 +32,7 @@
 gboolean skip_definer = FALSE;
 int restore_data_in_gstring_by_statement(struct thread_data *td, GString *data, gboolean is_schema, guint *query_counter)
 {
+  
   guint en=mysql_real_query(td->thrconn, data->str, data->len);
   if (en) {
     if (is_schema)
@@ -40,12 +41,16 @@ int restore_data_in_gstring_by_statement(struct thread_data *td, GString *data, 
       g_warning("Thread %d: Error restoring %d: %s", td->thread_id, en, mysql_error(td->thrconn));
     }
 
-//    if (en == CR_SERVER_GONE_ERROR || en == CR_SERVER_LOST){
-//      m_connect(td->thrconn, "myloader", NULL);
-    mysql_ping(td->thrconn);
-    execute_gstring(td->thrconn, set_session);
-    execute_use(td);
-//    }
+    if (mysql_ping(td->thrconn)) {
+      m_connect(td->thrconn, NULL);
+      execute_gstring(td->thrconn, set_session);
+      execute_use(td);
+      if (!is_schema && commit_count > 1) {
+        g_critical("Thread %d: Lost connection error", td->thread_id);
+        errors++;
+        return 2;
+      }
+    }
 
     g_warning("Thread %d: Retrying last failed executed statement", td->thread_id);
     g_atomic_int_inc(&(detailed_errors.retries));
