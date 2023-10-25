@@ -81,6 +81,7 @@
 extern GKeyFile * key_file;
 extern gint database_counter;
 //extern gint table_counter;
+extern MYSQL *main_connection;
 extern GAsyncQueue *stream_queue;
 extern gchar *output_directory;
 extern gchar *output_directory_param;
@@ -92,12 +93,13 @@ extern gboolean load_data;
 extern gboolean stream;
 extern int detected_server;
 extern gboolean no_delete;
-extern char *defaults_file;
 extern FILE * (*m_open)(const char *filename, const char *);
 extern int (*m_close)(void *file);
 extern int (*m_write)(FILE * file, const char * buff, int len);
 extern gchar *db;
 extern GString *set_session;
+extern GString *set_global;
+extern GString *set_global_back;
 extern guint num_threads;
 extern char **tables;
 extern gchar *tables_skiplist_file;
@@ -265,8 +267,7 @@ void initialize_start_dump(){
   }
 
   if (stream && exec_command != NULL){
-    g_critical("Stream and execute a command is not supported");
-    exit(EXIT_FAILURE);
+    m_critical("Stream and execute a command is not supported");
   }
 }
 
@@ -400,16 +401,22 @@ MYSQL *create_main_connection() {
   g_free(mydumper);
 
   set_session = g_string_new(NULL);
+  set_global = g_string_new(NULL);
+  set_global_back = g_string_new(NULL);
   detected_server = detect_server(conn);
   GHashTable * set_session_hash = mydumper_initialize_hash_of_session_variables();
+  GHashTable * set_global_hash = g_hash_table_new ( g_str_hash, g_str_equal );
   if (key_file != NULL ){
-    load_session_hash_from_key_file(key_file,set_session_hash,"mydumper_variables");
+    load_hash_of_all_variables_perproduct_from_key_file(key_file,set_global_hash,"mydumper_global_variables");
+    load_hash_of_all_variables_perproduct_from_key_file(key_file,set_session_hash,"mydumper_session_variables");
     load_per_table_info_from_key_file(key_file, &conf_per_table, &get_function_pointer_for);
   }
   refresh_set_session_from_hash(set_session,set_session_hash);
+  refresh_set_global_from_hash(set_global, set_global_back, set_global_hash);
   free_hash_table(set_session_hash);
   g_hash_table_unref(set_session_hash);
   execute_gstring(conn, set_session);
+  execute_gstring(conn, set_global);
 
   switch (detected_server) {
   case SERVER_TYPE_MYSQL:
@@ -423,8 +430,7 @@ MYSQL *create_main_connection() {
     g_message("Connected to a TiDB server");
     break;
   default:
-    g_critical("Cannot detect server type");
-    exit(EXIT_FAILURE);
+    m_critical("Cannot detect server type");
     break;
   }
 
@@ -479,8 +485,7 @@ void long_query_wait(MYSQL *conn){
             ucol = i;
         }
         if ((tcol < 0) || (ccol < 0) || (icol < 0)) {
-          g_critical("Error obtaining information from processlist");
-          exit(EXIT_FAILURE);
+          m_critical("Error obtaining information from processlist");
         }
         while ((row = mysql_fetch_row(res))) {
           if (row[ccol] && strcmp(row[ccol], "Query"))
@@ -507,13 +512,12 @@ void long_query_wait(MYSQL *conn){
           break;
         else {
           if (longquery_retries == 0) {
-            g_critical("There are queries in PROCESSLIST running longer than "
+            m_critical("There are queries in PROCESSLIST running longer than "
                        "%us, aborting dump,\n\t"
                        "use --long-query-guard to change the guard value, kill "
                        "queries (--kill-long-queries) or use \n\tdifferent "
                        "server for dump",
                        longquery);
-            exit(EXIT_FAILURE);
           }
           longquery_retries--;
           g_warning("There are queries in PROCESSLIST running longer than "
@@ -527,57 +531,50 @@ void long_query_wait(MYSQL *conn){
 
 void send_mariadb_backup_locks(MYSQL *conn){
   if (mysql_query(conn, "BACKUP STAGE START")) {
-    g_critical("Couldn't acquire BACKUP STAGE START: %s",
+    m_critical("Couldn't acquire BACKUP STAGE START: %s",
                mysql_error(conn));
     errors++;
-    exit(EXIT_FAILURE);
   }
 
   if (mysql_query(conn, "BACKUP STAGE FLUSH")) {
-    g_critical("Couldn't acquire BACKUP STAGE FLUSH: %s",
+    m_critical("Couldn't acquire BACKUP STAGE FLUSH: %s",
                mysql_error(conn));
     errors++;
-    exit(EXIT_FAILURE);
   }
   if (mysql_query(conn, "BACKUP STAGE BLOCK_DDL")) {
-    g_critical("Couldn't acquire BACKUP STAGE BLOCK_DDL: %s",
+    m_critical("Couldn't acquire BACKUP STAGE BLOCK_DDL: %s",
                mysql_error(conn));
     errors++;
-    exit(EXIT_FAILURE);
   }
 
   if (mysql_query(conn, "BACKUP STAGE BLOCK_COMMIT")) {
-    g_critical("Couldn't acquire BACKUP STAGE BLOCK_COMMIT: %s",
+    m_critical("Couldn't acquire BACKUP STAGE BLOCK_COMMIT: %s",
                mysql_error(conn));
     errors++;
-    exit(EXIT_FAILURE);
   }
 }
 
 void send_percona57_backup_locks(MYSQL *conn){
   if (mysql_query(conn, "LOCK TABLES FOR BACKUP")) {
-    g_critical("Couldn't acquire LOCK TABLES FOR BACKUP, snapshots will "
+    m_critical("Couldn't acquire LOCK TABLES FOR BACKUP, snapshots will "
                "not be consistent: %s",
                mysql_error(conn));
     errors++;
-    exit(EXIT_FAILURE);
   }
 
   if (mysql_query(conn, "LOCK BINLOG FOR BACKUP")) {
-    g_critical("Couldn't acquire LOCK BINLOG FOR BACKUP, snapshots will "
+    m_critical("Couldn't acquire LOCK BINLOG FOR BACKUP, snapshots will "
                "not be consistent: %s",
                mysql_error(conn));
     errors++;
-    exit(EXIT_FAILURE);
   }
 }
 
 void send_lock_instance_backup(MYSQL *conn){
   if (mysql_query(conn, "LOCK INSTANCE FOR BACKUP")) {
-    g_critical("Couldn't acquire LOCK INSTANCE FOR BACKUP: %s",
+    m_critical("Couldn't acquire LOCK INSTANCE FOR BACKUP: %s",
                mysql_error(conn));
     errors++;
-    exit(EXIT_FAILURE);
   }
 } 
 
@@ -765,8 +762,7 @@ void send_lock_all_tables(MYSQL *conn){
       retry += 1;
     }
     if (!success) {
-      g_critical("Lock all tables fail: %s", mysql_error(conn));
-      exit(EXIT_FAILURE);
+      m_critical("Lock all tables fail: %s", mysql_error(conn));
     }
   }else{
     g_warning("No table found to lock");
@@ -778,6 +774,7 @@ void send_lock_all_tables(MYSQL *conn){
 
 void start_dump() {
   MYSQL *conn = create_main_connection();
+  main_connection = conn;
   MYSQL *second_conn = conn;
   struct configuration conf = {1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0};
   char *metadata_partial_filename, *metadata_filename;
@@ -802,9 +799,8 @@ void start_dump() {
     GThread *sthread =
         g_thread_create(signal_thread, &conf, FALSE, &serror);
     if (sthread == NULL) {
-      g_critical("Could not create signal thread: %s", serror->message);
+      m_critical("Could not create signal thread: %s", serror->message);
       g_error_free(serror);
-      exit(EXIT_FAILURE);
     }
   }
 
@@ -817,9 +813,8 @@ void start_dump() {
     pmmthread =
         g_thread_create(pmm_thread, &conf, FALSE, &serror);
     if (pmmthread == NULL) {
-      g_critical("Could not create pmm thread: %s", serror->message);
+      m_critical("Could not create pmm thread: %s", serror->message);
       g_error_free(serror);
-      exit(EXIT_FAILURE);
     }
   }
 
@@ -828,16 +823,14 @@ void start_dump() {
 
   FILE *mdfile = g_fopen(metadata_partial_filename, "w");
   if (!mdfile) {
-    g_critical("Couldn't write metadata file %s (%d)", metadata_partial_filename, errno);
-    exit(EXIT_FAILURE);
+    m_critical("Couldn't write metadata file %s (%d)", metadata_partial_filename, errno);
   }
 
   if (updated_since > 0) {
     u = g_strdup_printf("%s/not_updated_tables", dump_directory);
     nufile = g_fopen(u, "w");
     if (!nufile) {
-      g_critical("Couldn't write not_updated_tables file (%d)", errno);
-      exit(EXIT_FAILURE);
+      m_critical("Couldn't write not_updated_tables file (%d)", errno);
     }
     get_not_updated(conn, nufile);
   }
@@ -857,8 +850,7 @@ void start_dump() {
       // the tidb-snapshot argument was not specified when starting mydumper
 
       if (mysql_query(conn, "SHOW MASTER STATUS")) {
-        g_critical("Couldn't generate @@tidb_snapshot: %s", mysql_error(conn));
-        exit(EXIT_FAILURE);
+        m_critical("Couldn't generate @@tidb_snapshot: %s", mysql_error(conn));
       } else {
 
         MYSQL_RES *result = mysql_store_result(conn);
@@ -876,8 +868,7 @@ void start_dump() {
     g_message("Set to tidb_snapshot '%s'", tidb_snapshot);
 
     if (mysql_query(conn, query)) {
-      g_critical("Failed to set tidb_snapshot: %s", mysql_error(conn));
-      exit(EXIT_FAILURE);
+      m_critical("Failed to set tidb_snapshot: %s", mysql_error(conn));
     }
     g_free(query);
 
@@ -1121,6 +1112,7 @@ void start_dump() {
   // close main connection
   if (conn != second_conn)
     mysql_close(second_conn);
+  execute_gstring(main_connection, set_global_back);
   mysql_close(conn);
   g_message("Main connection closed");  
 
@@ -1191,7 +1183,10 @@ void start_dump() {
   if (disk_check_thread!=NULL){
     disk_limits=NULL;
   }
+
   g_string_free(set_session, TRUE);
+  g_string_free(set_global, TRUE);
+  g_string_free(set_global_back, TRUE);
   free_common();
 }
 

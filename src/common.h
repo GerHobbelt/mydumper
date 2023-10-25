@@ -15,6 +15,9 @@
     Authors:        David Ducos, Percona (david dot ducos at percona dot com)
 */
 
+#include <mysql.h>
+#include <stdio.h>
+
 #ifndef _src_common_h
 #define _src_common_h
 
@@ -26,6 +29,7 @@ struct configuration_per_table{
 };
 
 #define STREAM_BUFFER_SIZE 1000000
+#define DEFAULTS_FILE "/etc/mydumper.cnf"
 typedef gchar * (*fun_ptr)(gchar **, GHashTable *);
 
 struct function_pointer{
@@ -49,10 +53,11 @@ void load_config_group(GKeyFile *kf, GOptionContext *context, const gchar * grou
 void execute_gstring(MYSQL *conn, GString *ss);
 gchar *replace_escaped_strings(gchar *c);
 void escape_tab_with(gchar *to);
-void load_session_hash_from_key_file(GKeyFile *kf, GHashTable * set_session_hash, const gchar * group_variables);
+void load_hash_from_key_file(GKeyFile *kf, GHashTable * set_session_hash, const gchar * group_variables);
 //void load_anonymized_functions_from_key_file(GKeyFile *kf, GHashTable *all_anonymized_function, fun_ptr get_function_pointer_for());
 void load_per_table_info_from_key_file(GKeyFile *kf, struct configuration_per_table * conf_per_table, fun_ptr get_function_pointer_for());
 void refresh_set_session_from_hash(GString *ss, GHashTable * set_session_hash);
+void refresh_set_global_from_hash(GString *ss, GString *sr, GHashTable * set_global_hash);
 gboolean is_table_in_list(gchar *table_name, gchar **tl);
 GHashTable * initialize_hash_of_session_variables();
 void load_common_entries(GOptionGroup *main_group);
@@ -70,3 +75,8 @@ void initialize_set_names();
 /* using fewer than 2 threads can cause mydumper to hang */
 #define MIN_THREAD_COUNT 2
 void check_num_threads();
+
+void m_error(const char *fmt, ...);
+void m_critical(const char *fmt, ...);
+
+void load_hash_of_all_variables_perproduct_from_key_file(GKeyFile *kf, GHashTable * set_session_hash, const gchar *str);

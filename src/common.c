@@ -19,10 +19,13 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <glib.h>
 #include <glib/gstdio.h>
 #include "server_detect.h"
 #include "common.h"
 #include "config.h"
+#include <stdarg.h>
+
 extern gboolean no_delete;
 extern gboolean stream;
 extern gchar *defaults_file;
@@ -31,7 +34,8 @@ extern gboolean no_stream;
 extern gchar*set_names_str;
 extern gchar*set_names_statement;
 extern guint num_threads;
-
+extern GString *set_global_back;
+extern MYSQL *main_connection;
 FILE * (*m_open)(const char *filename, const char *);
 GAsyncQueue *stream_queue = NULL;
 extern int detected_server;
@@ -149,8 +153,7 @@ void load_config_group(GKeyFile *kf, GOptionContext *context, const gchar * grou
     g_slist_free(list);
     // Second parse over the options
     if (!g_option_context_parse(context, &slen, &gclist, &error)) {
-      g_print("option parsing failed: %s, try --help\n", error->message);
-      exit(EXIT_FAILURE);
+      m_critical("option parsing failed: %s, try --help\n", error->message);
     }else{
       g_message("Config file loaded");
     }
@@ -159,7 +162,7 @@ void load_config_group(GKeyFile *kf, GOptionContext *context, const gchar * grou
   g_strfreev(keys);
 }
 
-void load_session_hash_from_key_file(GKeyFile *kf, GHashTable * set_session_hash, const gchar * group_variables){
+void load_hash_from_key_file(GKeyFile *kf, GHashTable * set_session_hash, const gchar * group_variables){
   guint i=0;
   GError *error = NULL;
   gchar *value=NULL;
@@ -214,6 +217,21 @@ void load_per_table_info_from_key_file(GKeyFile *kf, struct configuration_per_ta
 }
 
 
+void load_hash_of_all_variables_perproduct_from_key_file(GKeyFile *kf, GHashTable * set_session_hash, const gchar *str){
+  GString *s=g_string_new(str);
+  load_hash_from_key_file(kf,set_session_hash,s->str);
+  g_string_append_c(s,'_');
+  g_string_append(s,get_product_name());
+  load_hash_from_key_file(kf,set_session_hash,s->str);
+  g_string_append_printf(s,"_%d",get_major());
+  load_hash_from_key_file(kf,set_session_hash,s->str);
+  g_string_append_printf(s,"_%d",get_secondary());
+  load_hash_from_key_file(kf,set_session_hash,s->str);
+  g_string_append_printf(s,"_%d",get_revision());
+  load_hash_from_key_file(kf,set_session_hash,s->str);
+}
+
+
 void free_hash_table(GHashTable * hash){
   GHashTableIter iter;
   gchar * lkey;
@@ -225,10 +243,10 @@ void free_hash_table(GHashTable * hash){
   }
 }
 
-void refresh_set_session_from_hash(GString *ss, GHashTable * set_session_hash){
+void refresh_set_from_hash(GString *ss, const gchar * kind, GHashTable * set_hash){
   GHashTableIter iter;
   gchar * lkey;
-  g_hash_table_iter_init ( &iter, set_session_hash );
+  g_hash_table_iter_init ( &iter, set_hash );
   gchar *e=NULL;
   gchar *c=NULL;
   while ( g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &e ) ) {
@@ -236,10 +254,41 @@ void refresh_set_session_from_hash(GString *ss, GHashTable * set_session_hash){
     if (c!=NULL){
       c[0]='\0';
       c++;
-      g_string_append_printf(ss,"/%s SET SESSION %s = %s */;\n",c,lkey,e);
+      g_string_append_printf(ss,"/%s SET %s %s = %s */;\n", c, kind, lkey, e);
     }else
-      g_string_append_printf(ss,"SET SESSION %s = %s ;\n",lkey,e);
+      g_string_append_printf(ss,"SET %s %s = %s ;\n", kind, lkey, e);
   }
+}
+
+void refresh_set_session_from_hash(GString *ss, GHashTable * set_session_hash){
+  refresh_set_from_hash(ss, "SESSION", set_session_hash);
+}
+
+void set_global_rollback_from_hash(GString *ss, GString * sr, GHashTable * set_hash){
+  GHashTableIter iter;
+  gchar * lkey;
+  g_hash_table_iter_init ( &iter, set_hash );
+  gchar *e=NULL;
+//  gchar *c=NULL;
+  if (g_hash_table_size(set_hash) > 0){
+    GString *stmp=g_string_new(" INTO");
+    g_string_append(ss, "SELECT ");
+    g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &e );
+    g_string_append_printf(stmp," @%s", lkey);
+    g_string_append_printf(sr,"SET GLOBAL %s = @%s ;\n", lkey, lkey);
+    g_string_append_printf(ss," @@%s", lkey);
+    while ( g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &e ) ) {
+      g_string_append_printf(stmp,", @%s", lkey);
+      g_string_append_printf(sr,"SET GLOBAL %s = @%s ;\n", lkey, lkey);
+      g_string_append_printf(ss,", @@%s", lkey);
+    }
+    g_string_append_printf(ss,"%s ;\n",stmp->str);
+  }
+}
+
+void refresh_set_global_from_hash(GString *ss, GString *sr, GHashTable * set_global_hash){
+  set_global_rollback_from_hash(ss, sr, set_global_hash);
+  refresh_set_from_hash(ss, "GLOBAL", set_global_hash);
 }
 
 void free_hash(GHashTable * set_session_hash){
@@ -328,8 +377,7 @@ void escape_tab_with(gchar *to){
 void create_backup_dir(char *new_directory) {
   if (g_mkdir(new_directory, 0750) == -1) {
     if (errno != EEXIST) {
-      g_critical("Unable to create `%s': %s", new_directory, g_strerror(errno));
-      exit(EXIT_FAILURE);
+      m_critical("Unable to create `%s': %s", new_directory, g_strerror(errno));
     }
   }
 }
@@ -364,20 +412,26 @@ gboolean is_table_in_list(gchar *table_name, gchar **tl){
 
 
 void initialize_common_options(GOptionContext *context, const gchar *group){
-
-  if (defaults_file != NULL){
-    if (!g_file_test(defaults_file,G_FILE_TEST_EXISTS)){
-      g_critical("Default file not found");
-      exit(EXIT_FAILURE);
+  if (defaults_file == NULL ) 
+    if ( g_file_test(DEFAULTS_FILE, G_FILE_TEST_EXISTS) ){
+      defaults_file=g_strdup(DEFAULTS_FILE);
+    }else{
+      g_message("Using no configuration file");
+      return;
     }
-    if (!g_path_is_absolute(defaults_file)){
-      gchar *new_defaults_file=g_build_filename(g_get_current_dir(),defaults_file,NULL);
-      g_free(defaults_file);
-      defaults_file=new_defaults_file;
+  else{
+    if (defaults_file != NULL && !g_file_test(defaults_file,G_FILE_TEST_EXISTS)){
+      m_critical("Default file %s not found", defaults_file);
     }
-    key_file=load_config_file(defaults_file);
-    load_config_group(key_file, context, group);
   }
+  g_message("Using default file: %s", defaults_file);
+  if (!g_path_is_absolute(defaults_file)){
+    gchar *new_defaults_file=g_build_filename(g_get_current_dir(),defaults_file,NULL);
+    g_free(defaults_file);
+    defaults_file=new_defaults_file;
+  }
+  key_file=load_config_file(defaults_file);
+  load_config_group(key_file, context, group);
 }
 
 gchar **get_table_list(gchar *tables_list){
@@ -385,7 +439,7 @@ gchar **get_table_list(gchar *tables_list){
   guint i=0;
   for(i=0; i < g_strv_length(tl); i++){
     if (g_strstr_len(tl[i],strlen(tl[i]),".") == NULL )
-      g_error("Table name %s is not in DATABASE.TABLE format", tl[i]);
+      m_error("Table name %s is not in DATABASE.TABLE format", tl[i]);
   }
   return tl;
 }
@@ -452,3 +506,23 @@ void check_num_threads()
     num_threads = MIN_THREAD_COUNT;
   }
 }
+
+void m_error(const char *fmt, ...){
+  va_list    args;
+  execute_gstring(main_connection, set_global_back); 
+  g_error(fmt, args);
+}
+
+void m_critical(const char *fmt, ...){
+  va_list    args;
+  va_start(args, fmt);
+  gchar *c=g_strdup_vprintf(fmt,args);
+  execute_gstring(main_connection, set_global_back);
+  g_critical("%s",c);
+  exit(EXIT_FAILURE);
+}
+
+
+
+
+

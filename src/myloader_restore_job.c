@@ -19,6 +19,7 @@
 #include <glib/gstdio.h>
 #include <stdio.h>
 #include <string.h>
+#include "common.h"
 #include "myloader_restore_job.h"
 #include "myloader.h"
 #include "myloader_restore.h"
@@ -54,7 +55,7 @@ void initialize_restore_job(gchar * purge_mode_str){
     } else if (!strcmp(purge_mode_str,"NONE")){
       purge_mode=NONE;
     } else {
-      g_error("Purge mode unknown");
+      m_error("Purge mode unknown");
     }
   } else if (overwrite_tables)
     purge_mode=DROP; // Default mode is DROP when overwrite_tables is especified
@@ -210,8 +211,7 @@ void process_restore_job(struct thread_data *td, struct restore_job *rj){
             g_message("Waiting table to be created %s", rj->filename);
         }
         if (dbt->schema_state!=CREATED){
-          g_critical("Table has not been created in more than 10 seconds");
-          exit(EXIT_FAILURE);
+          m_critical("Table has not been created in more than 10 seconds");
         }
       }
       if (restore_data_from_file(td, dbt->database->real_database, dbt->real_table, rj->filename, FALSE) > 0){
@@ -227,8 +227,7 @@ void process_restore_job(struct thread_data *td, struct restore_job *rj){
       free_schema_restore_job(rj->data.srj);
       break;
     default:
-      g_critical("Something very bad happened!");
-      exit(EXIT_FAILURE);
+      m_critical("Something very bad happened!");
     }
 cleanup:
   if (rj != NULL ) free_restore_job(rj);

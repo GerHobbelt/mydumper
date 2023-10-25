@@ -303,8 +303,7 @@ int main(int argc, char *argv[]) {
   gchar ** tmpargv=g_strdupv(argv);
   int tmpargc=argc;
   if (!g_option_context_parse(context, &tmpargc, &tmpargv, &error)) {
-    g_print("option parsing failed: %s, try --help\n", error->message);
-    exit(EXIT_FAILURE);
+    m_critical("option parsing failed: %s, try --help\n", error->message);
   }
   g_strfreev(tmpargv);
 
@@ -356,9 +355,8 @@ int main(int argc, char *argv[]) {
     pmmthread =
         g_thread_create(pmm_thread, &conf, FALSE, &serror);
     if (pmmthread == NULL) {
-      g_critical("Could not create pmm thread: %s", serror->message);
+      m_critical("Could not create pmm thread: %s", serror->message);
       g_error_free(serror);
-      exit(EXIT_FAILURE);
     }
   }
   initialize_job(purge_mode_str);
@@ -374,8 +372,7 @@ int main(int argc, char *argv[]) {
       g_date_time_unref(datetime);
       g_free(datetimestr); 
     }else{
-      g_critical("a directory needs to be specified, see --help\n");
-      exit(EXIT_FAILURE);
+      m_critical("a directory needs to be specified, see --help\n");
     }
   } else {
     directory=g_strdup_printf("%s/%s", g_str_has_prefix(input_directory,"/")?"":current_dir, input_directory);
@@ -383,15 +380,13 @@ int main(int argc, char *argv[]) {
       if (stream){
         create_backup_dir(directory);
       }else{
-        g_critical("the specified directory doesn't exists\n");
-        exit(EXIT_FAILURE);
+        m_critical("the specified directory doesn't exists\n");
       }
     }
     if (!stream){
       char *p = g_strdup_printf("%s/metadata", directory);
       if (!g_file_test(p, G_FILE_TEST_EXISTS)) {
-        g_critical("the specified directory %s is not a mydumper backup",directory);
-        exit(EXIT_FAILURE);
+        m_critical("the specified directory %s is not a mydumper backup",directory);
       }
 //      initialize_directory();
     }
@@ -408,9 +403,8 @@ int main(int argc, char *argv[]) {
   GThread *sthread =
       g_thread_create(signal_thread, &conf, FALSE, &serror);
   if (sthread == NULL) {
-    g_critical("Could not create signal thread: %s", serror->message);
+    m_critical("Could not create signal thread: %s", serror->message);
     g_error_free(serror);
-    exit(EXIT_FAILURE);
   }
 
   MYSQL *conn;
@@ -418,13 +412,20 @@ int main(int argc, char *argv[]) {
   m_connect(conn,"myloader",NULL);
 
   set_session = g_string_new(NULL);
+  set_global = g_string_new(NULL);
+  set_global_back = g_string_new(NULL);
   detected_server = detect_server(conn);
   detect_server_version(conn);
   GHashTable * set_session_hash = myloader_initialize_hash_of_session_variables();
-  if (defaults_file)
-    load_session_hash_from_key_file(key_file,set_session_hash,"myloader_variables");
+  GHashTable * set_global_hash = g_hash_table_new ( g_str_hash, g_str_equal );
+  if (defaults_file){
+    load_hash_of_all_variables_perproduct_from_key_file(key_file,set_global_hash,"myloader_global_variables");
+    load_hash_of_all_variables_perproduct_from_key_file(key_file,set_session_hash,"myloader_session_variables");
+  }
   refresh_set_session_from_hash(set_session,set_session_hash);
+  refresh_set_global_from_hash(set_global,set_global_back, set_global_hash);
   execute_gstring(conn, set_session);
+  execute_gstring(conn, set_global);
 
   // TODO: we need to set the variables in the initilize session varibles, not from:
 //  if (mysql_query(conn, "SET SESSION wait_timeout = 2147483")) {
@@ -438,7 +439,7 @@ int main(int argc, char *argv[]) {
       g_message("Disabling redologs");
       mysql_query(conn, "ALTER INSTANCE DISABLE INNODB REDO_LOG");
     }else{
-      g_error("Disabling redologs is not supported for version %d.%d", get_major(), get_secondary());
+      m_error("Disabling redologs is not supported for version %d.%d", get_major(), get_secondary());
     }
   }
   mysql_query(conn, "/*!40014 SET FOREIGN_KEY_CHECKS=0*/");
@@ -460,13 +461,11 @@ int main(int argc, char *argv[]) {
 
   if (g_file_test("resume",G_FILE_TEST_EXISTS)){
     if (!resume){
-      g_critical("Resume file found but --resume has not been provided");
-      exit(EXIT_FAILURE);
+      m_critical("Resume file found but --resume has not been provided");
     }
   }else{
     if (resume){
-      g_critical("Resume file not found");
-      exit(EXIT_FAILURE);
+      m_critical("Resume file not found");
     }
   }
 
@@ -490,8 +489,7 @@ int main(int argc, char *argv[]) {
 
   if (stream){
     if (resume){
-      g_critical("We don't expect to find resume files in a stream scenario");
-      exit(EXIT_FAILURE);
+      m_critical("We don't expect to find resume files in a stream scenario");
     }
     initialize_stream(&conf);
   }
@@ -536,6 +534,7 @@ int main(int argc, char *argv[]) {
   free_hash(set_session_hash);
   g_hash_table_remove_all(set_session_hash);
   g_hash_table_unref(set_session_hash);
+  execute_gstring(conn, set_global_back);
   mysql_close(conn);
   mysql_thread_end();
   mysql_library_end();
@@ -567,7 +566,6 @@ int main(int argc, char *argv[]) {
     tl=tl->next;
   }
 */
-
   return errors ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 

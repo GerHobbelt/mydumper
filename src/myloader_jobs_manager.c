@@ -115,18 +115,17 @@ void *loader_thread(struct thread_data *td) {
   m_connect(td->thrconn, "myloader", NULL);
 
 //  mysql_query(td->thrconn, set_names_statement);
-  mysql_query(td->thrconn, "/*!40101 SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */");
-  mysql_query(td->thrconn, "/*!40014 SET UNIQUE_CHECKS=0 */");
-  mysql_query(td->thrconn, "/*!40014 SET FOREIGN_KEY_CHECKS=0*/");
+//  mysql_query(td->thrconn, "/*!40101 SET SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */");
+//  mysql_query(td->thrconn, "/*!40014 SET UNIQUE_CHECKS=0 */");
+//  mysql_query(td->thrconn, "/*!40014 SET FOREIGN_KEY_CHECKS=0*/");
 
   execute_gstring(td->thrconn, set_session);
   g_async_queue_push(conf->ready, GINT_TO_POINTER(1));
 
   if (db){
     td->current_database=db;
-    if (execute_use(td, "Initializing thread")){
-      g_critical("Changing to database: %s %s", td->current_database,db);
-      exit(EXIT_FAILURE);
+    if (execute_use(td)){
+      m_critical("Thread %d: Error switching to database `%s` when initializing", td->thread_id, td->current_database);
     }
   }
 

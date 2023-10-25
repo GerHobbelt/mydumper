@@ -388,8 +388,7 @@ void thd_JOB_DUMP_ALL_DATABASES( struct thread_data *td, struct job *job){
   MYSQL_ROW row;
   if (mysql_query(td->thrconn, "SHOW DATABASES") ||
       !(databases = mysql_store_result(td->thrconn))) {
-    g_critical("Unable to list databases: %s", mysql_error(td->thrconn));
-    exit(EXIT_FAILURE);
+    m_critical("Unable to list databases: %s", mysql_error(td->thrconn));
   }
 
   while ((row = mysql_fetch_row(databases))) {
@@ -552,7 +551,7 @@ void thd_JOB_DUMP(struct thread_data *td, struct job *job){
       write_table_job_into_file(td->thrconn, tj);
       break;
     default: 
-      g_error("dbt on UNDEFINED shouldn't happen. This must be a bug");
+      m_error("dbt on UNDEFINED shouldn't happen. This must be a bug");
       break;
   }
   if (tj->sql_file){
@@ -650,9 +649,8 @@ gboolean are_all_threads_in_same_pos(struct thread_data *td){
 
 void initialize_consistent_snapshot(struct thread_data *td){
   if ( sync_wait != -1 && mysql_query(td->thrconn, g_strdup_printf("SET SESSION WSREP_SYNC_WAIT = %d",sync_wait))){
-    g_critical("Failed to set wsrep_sync_wait for the thread: %s",
+    m_critical("Failed to set wsrep_sync_wait for the thread: %s",
                mysql_error(td->thrconn));
-    exit(EXIT_FAILURE);
   }
   set_transaction_isolation_level_repeatable_read(td->thrconn);
   guint start_transaction_retry=0;
@@ -663,8 +661,7 @@ void initialize_consistent_snapshot(struct thread_data *td){
     g_debug("Thread %d: Start trasaction #%d", td->thread_id, start_transaction_retry);
     if (mysql_query(td->thrconn,
                   "START TRANSACTION /*!40108 WITH CONSISTENT SNAPSHOT */")) {
-      g_critical("Failed to start consistent snapshot: %s", mysql_error(td->thrconn));
-      exit(EXIT_FAILURE);
+      m_critical("Failed to start consistent snapshot: %s", mysql_error(td->thrconn));
     }
     if (mysql_query(td->thrconn,
                   "SHOW STATUS LIKE 'binlog_snapshot_gtid_executed'")) {
@@ -693,8 +690,7 @@ void initialize_consistent_snapshot(struct thread_data *td){
       if (no_locks){ 
         g_warning("Backup will not be consistent, but we are continuing because you use --no-locks.");
       }else{
-        g_error("Backup will not be consistent. Threads are in different points in time. Use --no-locks if you expect inconsistent backups.");
-        exit(EXIT_FAILURE);
+        m_critical("Backup will not be consistent. Threads are in different points in time. Use --no-locks if you expect inconsistent backups.");
       }
     }
   }
@@ -707,8 +703,7 @@ void check_connection_status(struct thread_data *td){
     gchar *query =
         g_strdup_printf("SET SESSION tidb_snapshot = '%s'", tidb_snapshot);
     if (mysql_query(td->thrconn, query)) {
-      g_critical("Failed to set tidb_snapshot: %s", mysql_error(td->thrconn));
-      exit(EXIT_FAILURE);
+      m_critical("Failed to set tidb_snapshot: %s", mysql_error(td->thrconn));
     }
     g_free(query);
     g_message("Thread %d: set to tidb_snapshot '%s'", td->thread_id,
@@ -856,7 +851,7 @@ gboolean process_job_builder_job(struct thread_data *td, struct job *job){
       return FALSE;
       break;
     default:
-      g_error("Something very bad happened!");
+      m_error("Something very bad happened!");
   }
   return TRUE;
 }
@@ -902,7 +897,7 @@ gboolean process_job(struct thread_data *td, struct job *job){
       return FALSE;
       break;
     default:
-      g_error("Something very bad happened!");
+      m_error("Something very bad happened!");
     }
   return TRUE;
 }
@@ -1159,9 +1154,8 @@ void *working_thread(struct thread_data *td) {
   }
   if (!td->less_locking_stage){
     if (use_savepoints && mysql_query(td->thrconn, "SET SQL_LOG_BIN = 0")) {
-      g_critical("Failed to disable binlog for the thread: %s",
+      m_critical("Failed to disable binlog for the thread: %s",
                  mysql_error(td->thrconn));
-      exit(EXIT_FAILURE);
     }
     initialize_consistent_snapshot(td);
     check_connection_status(td);
@@ -1188,13 +1182,13 @@ void *working_thread(struct thread_data *td) {
     if (less_locking){
       // Sending LOCK TABLE over all non-innodb tables
       if (mysql_query(td->thrconn, td->conf->lock_tables_statement->str)) {
-        g_error("Error locking non-innodb tables %s", mysql_error(td->thrconn));
+        m_error("Error locking non-innodb tables %s", mysql_error(td->thrconn));
       }
       // This push will unlock the FTWRL on the Main Connection
       g_async_queue_push(td->conf->unlock_tables, GINT_TO_POINTER(1));
       process_queue(td->conf->non_innodb_queue, td, resume_mutex, process_job, give_me_another_non_innodb_chunk_step);
       if (mysql_query(td->thrconn, UNLOCK_TABLES)) {
-        g_error("Error locking non-innodb tables %s", mysql_error(td->thrconn));
+        m_error("Error locking non-innodb tables %s", mysql_error(td->thrconn));
       }
     }else{
       process_queue(td->conf->non_innodb_queue, td, resume_mutex, process_job, give_me_another_non_innodb_chunk_step);

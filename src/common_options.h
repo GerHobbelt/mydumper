@@ -29,7 +29,10 @@ char *tls_version = NULL;
 gchar *ssl_mode = NULL;
 #endif
 int detected_server = 0;
-GString *set_session=NULL;
+GString *set_session = NULL;
+GString *set_global = NULL;
+GString *set_global_back = NULL;
+MYSQL *main_connection = NULL;
 gboolean no_data = FALSE;
 GKeyFile *key_file = NULL;
 gchar *compress_extension = NULL;
@@ -63,7 +66,7 @@ GOptionEntry common_entries[] = {
      "(automatically sets verbosity to 3)", NULL},
 #endif
     {"defaults-file", 0, 0, G_OPTION_ARG_FILENAME, &defaults_file,
-     "Use a specific defaults file", NULL},
+     "Use a specific defaults file. Default: /etc/mydumper.cnf", NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
 
 
