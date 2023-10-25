@@ -904,7 +904,7 @@ void do_JOB_SCHEMA(struct thread_data *td, struct job *job){
   g_message("Thread %d: dumping schema for `%s`.`%s`", td->thread_id,
             sj->dbt->database->name, sj->dbt->table);
   write_table_definition_into_file(td->thrconn, sj->dbt, sj->filename, sj->checksum_filename, sj->checksum_index_filename);
-//  free_schema_job(sj);
+  free_schema_job(sj);
   g_free(job);
 //  if (g_atomic_int_dec_and_test(&table_counter)) {
 //    g_message("Unlocing ready_table_dump_mutex");
@@ -1081,7 +1081,7 @@ void execute_file_per_thread( gchar *sql_fn, gchar *sql_fn3){
   }
 }
 
-void initialize_fn(gchar ** sql_filename, struct db_table * dbt, FILE ** sql_file, guint fn, guint sub_part, const gchar *extension, gchar * f()){
+void initialize_fn(gchar ** sql_filename, struct db_table * dbt, FILE ** sql_file, guint64 fn, guint sub_part, const gchar *extension, gchar * f()){
   gchar *stdout_fn=NULL;
 /*  if (*sql_filename != NULL){
     remove(*sql_filename);
@@ -1094,6 +1094,8 @@ void initialize_fn(gchar ** sql_filename, struct db_table * dbt, FILE ** sql_fil
     stdout_fn = build_stdout_filename(dbt->database->filename, dbt->table_filename, fn, sub_part, extension, exec_per_thread_extension);
     execute_file_per_thread(*sql_filename,stdout_fn);
   }else{
+    if (*sql_filename)
+      g_free(*sql_filename);
     *sql_filename = f(dbt->database->filename, dbt->table_filename, fn, sub_part);
   }
   *sql_file = m_open(*sql_filename,"w");
@@ -1122,7 +1124,7 @@ gboolean update_files_on_table_job(struct table_job *tj){
 }
 
 
-struct table_job * new_table_job(struct db_table *dbt, char *partition, guint nchunk, char *order_by, union chunk_step *chunk_step, gboolean update_where){
+struct table_job * new_table_job(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, union chunk_step *chunk_step, gboolean update_where){
   struct table_job *tj = g_new0(struct table_job, 1);
 // begin Refactoring: We should review this, as dbt->database should not be free, so it might be no need to g_strdup.
   // from the ref table?? TODO
@@ -1149,7 +1151,7 @@ struct table_job * new_table_job(struct db_table *dbt, char *partition, guint nc
   return tj;
 }
 
-struct job * create_job_to_dump_chunk_without_enqueuing(struct db_table *dbt, char *partition, guint nchunk, char *order_by, union chunk_step *chunk_step, gboolean update_where){
+struct job * create_job_to_dump_chunk_without_enqueuing(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, union chunk_step *chunk_step, gboolean update_where){
   struct job *j = g_new0(struct job,1);
   struct table_job *tj = new_table_job(dbt, partition, nchunk, order_by, chunk_step, update_where);
   j->job_data=(void*) tj;
@@ -1159,7 +1161,7 @@ struct job * create_job_to_dump_chunk_without_enqueuing(struct db_table *dbt, ch
   return j;
 }
 
-void create_job_to_dump_chunk(struct db_table *dbt, char *partition, guint nchunk, char *order_by, union chunk_step *chunk_step, void f(), GAsyncQueue *queue, gboolean update_where){
+void create_job_to_dump_chunk(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, union chunk_step *chunk_step, void f(), GAsyncQueue *queue, gboolean update_where){
   struct job *j = g_new0(struct job,1);
   struct table_job *tj = new_table_job(dbt, partition, nchunk, order_by, chunk_step, update_where);
   j->job_data=(void*) tj;

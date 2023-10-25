@@ -48,6 +48,12 @@ enum chunk_type{
   PARTITION
 };
 
+enum chunk_states{
+  UNASSIGNED,
+  ASSIGNED,
+  COMPLETED
+};
+
 struct configuration {
   char use_any_index;
   GAsyncQueue *initial_queue;
@@ -62,6 +68,7 @@ struct configuration {
   GAsyncQueue *pause_resume;
   GAsyncQueue *gtid_pos_checked;
   GAsyncQueue *are_all_threads_in_same_pos;
+  GMainLoop * loop;
   GString *lock_tables_statement;
   GMutex *mutex;
   int done;
@@ -93,10 +100,10 @@ struct integer_step {
   guint64 step;
   guint64 nmax;
   guint64 estimated_remaining_steps;
-  guint number;
+  guint64 number;
   guint deep;
   GMutex *mutex;
-  gboolean assigned;
+  enum chunk_states status;
   gboolean check_max;
   gboolean check_min;
 };
@@ -153,7 +160,7 @@ struct table_job {
 //  char *database;
 //  char *table;
   char *partition;
-  guint nchunk;
+  guint64 nchunk;
   guint sub_part;
 //  char *filename;
   char *where;
