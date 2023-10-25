@@ -220,7 +220,6 @@ void dump_database_thread(MYSQL *, struct configuration*, struct database *);
 gchar *get_primary_key_string(MYSQL *conn, char *database, char *table);
 guint64 estimate_count(MYSQL *conn, char *database, char *table, char *field,
                        char *from, char *to);
-guint64 write_table_data_into_file(MYSQL *conn, struct table_job *tj);
 void write_table_job_into_file(MYSQL *conn, struct table_job * tj);
 
 void load_working_thread_entries(GOptionContext *context, GOptionGroup *extra_group, GOptionGroup * filter_group){
@@ -435,8 +434,15 @@ void get_table_info_to_process_from_list(MYSQL *conn, struct configuration *conf
   for (x = 0; table_list[x] != NULL; x++) {
     dt = g_strsplit(table_list[x], ".", 0);
 
-    query =
-        g_strdup_printf("SHOW TABLE STATUS FROM %s LIKE '%s'", dt[0], dt[1]);
+    // Need 7 columns with DATA_LENGTH as the last one for this to work
+    if (detected_server == SERVER_TYPE_MARIADB)
+      query =
+          g_strdup_printf("SELECT TABLE_NAME, ENGINE, TABLE_TYPE as COMMENT, TABLE_COLLATION as COLLATION, AVG_ROW_LENGTH, DATA_LENGTH FROM "
+                          "INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'",
+                          dt[0], dt[1]);
+    else
+      query =
+          g_strdup_printf("SHOW TABLE STATUS FROM %s LIKE '%s'", dt[0], dt[1]);
 
     if (mysql_query(conn, (query))) {
       g_critical("Error showing table status on: %s - Could not execute query: %s", dt[0],
@@ -473,7 +479,8 @@ void get_table_info_to_process_from_list(MYSQL *conn, struct configuration *conf
 
       int is_view = 0;
 
-      if ((detected_server == SERVER_TYPE_MYSQL) &&
+      if ((detected_server == SERVER_TYPE_MYSQL ||
+           detected_server == SERVER_TYPE_MARIADB) &&
           (row[ccol] == NULL || !strcmp(row[ccol], "VIEW")))
         is_view = 1;
 
@@ -536,6 +543,7 @@ void thd_JOB_DUMP(struct thread_data *td, struct job *job){
   if (use_savepoints && mysql_query(td->thrconn, "SAVEPOINT mydumper")) {
     g_critical("Savepoint failed: %s", mysql_error(td->thrconn));
   }
+  tj->td=td;
   switch (tj->dbt->chunk_type) {
     case INTEGER:
       process_integer_chunk(td, tj);
@@ -547,7 +555,7 @@ void thd_JOB_DUMP(struct thread_data *td, struct job *job){
       process_partition_chunk(td, tj);
       break;
     case NONE:
-      message_dumping_data(td,tj);
+//      message_dumping_data(td,tj);
       write_table_job_into_file(td->thrconn, tj);
       break;
     default: 
@@ -587,6 +595,7 @@ void thd_JOB_DUMP(struct thread_data *td, struct job *job){
       mysql_query(td->thrconn, "ROLLBACK TO SAVEPOINT mydumper")) {
     g_critical("Rollback to savepoint failed: %s", mysql_error(td->thrconn));
   }
+  tj->td=NULL;
 //  free_table_job(tj);
   g_free(job);
 }
@@ -902,20 +911,21 @@ gboolean process_job(struct thread_data *td, struct job *job){
   return TRUE;
 }
 
+void check_pause_resume( struct thread_data *td ){
+  if (td->conf->pause_resume){
+    td->pause_resume_mutex = (GMutex *)g_async_queue_try_pop(td->conf->pause_resume);
+    if (td->pause_resume_mutex != NULL){
+      g_mutex_lock(td->pause_resume_mutex);
+      g_mutex_unlock(td->pause_resume_mutex);
+      td->pause_resume_mutex=NULL;
+    }
+  }
+}
 
-
-void process_queue(GAsyncQueue * queue, struct thread_data *td, GMutex *resume_mutex, gboolean (*p)(), void (*f)()){
+void process_queue(GAsyncQueue * queue, struct thread_data *td, gboolean (*p)(), void (*f)()){
   struct job *job = NULL;
   for (;;) {
-    if (td->conf->pause_resume){
-      resume_mutex = (GMutex *)g_async_queue_try_pop(td->conf->pause_resume);
-      if (resume_mutex != NULL){
-        g_mutex_lock(resume_mutex);
-        g_mutex_unlock(resume_mutex);
-        resume_mutex=NULL;
-        continue;
-      }
-    }
+    check_pause_resume(td);
     if (f!=NULL)
       f();
     job = (struct job *)g_async_queue_pop(queue);
@@ -994,13 +1004,14 @@ void process_integer_chunk_job(struct thread_data *td, struct table_job *tj){
     tj->chunk_step->integer_step.check_min=FALSE;
   }
   tj->chunk_step->integer_step.cursor = tj->chunk_step->integer_step.nmin + tj->chunk_step->integer_step.step > tj->chunk_step->integer_step.nmax ? tj->chunk_step->integer_step.nmax : tj->chunk_step->integer_step.nmin + tj->chunk_step->integer_step.step;
+  tj->chunk_step->integer_step.estimated_remaining_steps=1+(tj->chunk_step->integer_step.nmax - tj->chunk_step->integer_step.cursor) / tj->chunk_step->integer_step.step;
   g_mutex_unlock(tj->chunk_step->integer_step.mutex);
 /*  if (tj->chunk_step->integer_step.nmin == tj->chunk_step->integer_step.nmax){
     return;
   }*/
 //  g_message("CONTINUE");
   update_where_on_table_job(td, tj);
-  message_dumping_data(td,tj);
+//  message_dumping_data(td,tj);
 
   GDateTime *from = g_date_time_new_now_local();
   write_table_job_into_file(td->thrconn, tj);
@@ -1027,15 +1038,18 @@ void process_integer_chunk(struct thread_data *td, struct table_job *tj){
   struct db_table *dbt = tj->dbt;
   union chunk_step *cs = tj->chunk_step;
   process_integer_chunk_job(td,tj);
+  g_atomic_int_inc(dbt->chunks_completed);
   if (cs->integer_step.prefix)
     g_free(cs->integer_step.prefix);
   cs->integer_step.prefix=NULL;
   while ( cs->integer_step.nmin < cs->integer_step.nmax ){
     process_integer_chunk_job(td,tj);
+    g_atomic_int_inc(dbt->chunks_completed);
   }
   g_mutex_lock(dbt->chunks_mutex);
   g_mutex_lock(cs->integer_step.mutex);
   dbt->chunks=g_list_remove(dbt->chunks,cs);
+  tj->chunk_step->integer_step.estimated_remaining_steps=0;
   if (g_list_length(dbt->chunks) == 0){
     g_message("Thread %d: Table %s completed ",td->thread_id,dbt->table);
     dbt->chunks=NULL;
@@ -1051,7 +1065,7 @@ void process_char_chunk_job(struct thread_data *td, struct table_job *tj){
   update_where_on_table_job(td, tj);
   g_mutex_unlock(tj->chunk_step->char_step.mutex);
 
-  message_dumping_data(td,tj);
+//  message_dumping_data(td,tj);
 
   GDateTime *from = g_date_time_new_now_local();
   write_table_job_into_file(td->thrconn, tj);
@@ -1133,7 +1147,7 @@ void process_partition_chunk(struct thread_data *td, struct table_job *tj){
     g_mutex_unlock(cs->partition_step.mutex);
     tj->partition = partition;
 // = new_table_job(dbt, partition ,  cs->partition_step.number, dbt->primary_key, cs);
-    message_dumping_data(td,tj);
+//    message_dumping_data(td,tj);
     write_table_job_into_file(td->thrconn, tj);
     g_free(partition);
   }
@@ -1167,12 +1181,11 @@ void *working_thread(struct thread_data *td) {
   g_async_queue_push(td->conf->ready, GINT_TO_POINTER(1));
   // Thread Ready to process jobs
   
-  GMutex *resume_mutex=NULL;
   g_message("Thread %d: Creating Jobs", td->thread_id);
-  process_queue(td->conf->initial_queue,td, resume_mutex, process_job_builder_job, NULL);
+  process_queue(td->conf->initial_queue,td, process_job_builder_job, NULL);
 
   g_async_queue_push(td->conf->ready, GINT_TO_POINTER(1));
-  process_queue(td->conf->schema_queue,td, resume_mutex, process_job, NULL);
+  process_queue(td->conf->schema_queue,td, process_job, NULL);
 
   if (!no_data){
     g_message("Thread %d: Schema Done, Starting Non-Innodb", td->thread_id);
@@ -1186,23 +1199,23 @@ void *working_thread(struct thread_data *td) {
       }
       // This push will unlock the FTWRL on the Main Connection
       g_async_queue_push(td->conf->unlock_tables, GINT_TO_POINTER(1));
-      process_queue(td->conf->non_innodb_queue, td, resume_mutex, process_job, give_me_another_non_innodb_chunk_step);
+      process_queue(td->conf->non_innodb_queue, td, process_job, give_me_another_non_innodb_chunk_step);
       if (mysql_query(td->thrconn, UNLOCK_TABLES)) {
         m_error("Error locking non-innodb tables %s", mysql_error(td->thrconn));
       }
     }else{
-      process_queue(td->conf->non_innodb_queue, td, resume_mutex, process_job, give_me_another_non_innodb_chunk_step);
+      process_queue(td->conf->non_innodb_queue, td, process_job, give_me_another_non_innodb_chunk_step);
       g_async_queue_push(td->conf->unlock_tables, GINT_TO_POINTER(1));
     }
 
     g_message("Thread %d: Non-Innodb Done, Starting Innodb", td->thread_id);
-    process_queue(td->conf->innodb_queue, td, resume_mutex, process_job, give_me_another_innodb_chunk_step);
+    process_queue(td->conf->innodb_queue, td, process_job, give_me_another_innodb_chunk_step);
   //  start_processing(td, resume_mutex);
   }else{
     g_async_queue_push(td->conf->unlock_tables, GINT_TO_POINTER(1));
   }
 
-  process_queue(td->conf->post_data_queue, td, resume_mutex, process_job, NULL);
+  process_queue(td->conf->post_data_queue, td, process_job, NULL);
 
   g_message("Thread %d: shutting down", td->thread_id);
 
@@ -1353,6 +1366,8 @@ struct db_table *new_db_table( MYSQL *conn, struct configuration *conf, struct d
   dbt->insert_statement=NULL;
   dbt->chunks_mutex=g_mutex_new();
   dbt->chunks_queue=g_async_queue_new();
+  dbt->chunks_completed=g_new(int,1);
+  *(dbt->chunks_completed)=0;
   dbt->field=get_field_for_dbt(conn,dbt,conf);
   dbt->primary_key = get_primary_key_string(conn, dbt->database->name, dbt->table);
 //  set_chunk_strategy_for_dbt(conn, dbt);
@@ -1538,11 +1553,13 @@ void dump_database_thread(MYSQL *conn, struct configuration *conf, struct databa
   if (detected_server == SERVER_TYPE_MYSQL ||
       detected_server == SERVER_TYPE_TIDB)
     query = g_strdup("SHOW TABLE STATUS");
-  else
+  else if (detected_server == SERVER_TYPE_MARIADB)
     query =
-        g_strdup_printf("SELECT TABLE_NAME, ENGINE, TABLE_TYPE as COMMENT FROM "
-                        "DATA_DICTIONARY.TABLES WHERE TABLE_SCHEMA='%s'",
+        g_strdup_printf("SELECT TABLE_NAME, ENGINE, TABLE_TYPE as COMMENT, TABLE_COLLATION as COLLATION, AVG_ROW_LENGTH, DATA_LENGTH FROM "
+                        "INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='%s'",
                         database->escaped);
+  else
+      return;
 
   if (mysql_query(conn, (query))) {
       g_critical("Error showing tables on: %s - Could not execute query: %s", database->name,
@@ -1574,7 +1591,8 @@ void dump_database_thread(MYSQL *conn, struct configuration *conf, struct databa
        TABLE STATUS row[1] == NULL if it is a view in 5.0 'SHOW TABLE STATUS'
             row[1] == "VIEW" if it is a view in 5.0 'SHOW FULL TABLES'
     */
-    if ((detected_server == SERVER_TYPE_MYSQL) &&
+    if ((detected_server == SERVER_TYPE_MYSQL ||
+         detected_server == SERVER_TYPE_MARIADB) &&
         (row[ccol] == NULL || !strcmp(row[ccol], "VIEW")))
       is_view = 1;
 

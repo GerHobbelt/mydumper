@@ -423,8 +423,9 @@ MYSQL *create_main_connection() {
     g_message("Connected to a MySQL server");
     set_transaction_isolation_level_repeatable_read(conn);
     break;
-  case SERVER_TYPE_DRIZZLE:
-    g_message("Connected to a Drizzle server");
+  case SERVER_TYPE_MARIADB:
+    g_message("Connected to a MariaDB server");
+    set_transaction_isolation_level_repeatable_read(conn);
     break;
   case SERVER_TYPE_TIDB:
     g_message("Connected to a TiDB server");
@@ -955,9 +956,6 @@ void start_dump() {
   
   }
 
-  GThread **threads = g_new(GThread *, num_threads );
-  struct thread_data *td =
-      g_new(struct thread_data, num_threads * (less_locking + 1));
 
   conf.initial_queue = g_async_queue_new();
   conf.schema_queue = g_async_queue_new();
@@ -973,7 +971,7 @@ void start_dump() {
   g_mutex_lock(ready_table_dump_mutex);
 
 
-  if (detected_server == SERVER_TYPE_MYSQL) {
+  if (detected_server == SERVER_TYPE_MYSQL || detected_server == SERVER_TYPE_MARIADB) {
     create_job_to_dump_metadata(&conf, mdfile);
   }
 
@@ -1004,11 +1002,15 @@ void start_dump() {
     chunk_builder=g_thread_create((GThreadFunc)chunk_builder_thread, &conf, TRUE, NULL);
   }
 
+  GThread **threads = g_new(GThread *, num_threads );
+  struct thread_data *td =
+      g_new(struct thread_data, num_threads * (less_locking + 1));
   for (n = 0; n < num_threads; n++) {
     td[n].conf = &conf;
     td[n].thread_id = n + 1;
     td[n].less_locking_stage = FALSE;
     td[n].binlog_snapshot_gtid_executed = NULL;
+    td[n].pause_resume_mutex=NULL;
     threads[n] =
         g_thread_create((GThreadFunc)working_thread, &td[n], TRUE, NULL);
  //   g_async_queue_pop(conf.ready);
