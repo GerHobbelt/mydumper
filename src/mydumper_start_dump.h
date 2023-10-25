@@ -206,11 +206,12 @@ struct db_table {
   gboolean complete_insert;
   GString *insert_statement;
   gboolean is_innodb;
+  gboolean has_json_fields;
   char *character_set;
   guint64 datalength;
   guint64 rows;
   GMutex *rows_lock;
-  GList *anonymized_function;
+  struct function_pointer ** anonymized_function;
   gchar *where;
   gchar *limit;
   guint num_threads;

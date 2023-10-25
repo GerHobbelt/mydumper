@@ -1152,37 +1152,71 @@ GString *get_insertable_fields(MYSQL *conn, char *database, char *table) {
   return field_list;
 }
 
-GList *get_anonymized_function_for(MYSQL *conn, gchar *database, gchar *table){
-  // TODO #364: this is the place where we need to link the column between file loaded and dbt.
-  // Currently, we are using identity_function, which return the same data.
-  // Key: `database`.`table`.`column`
 
+gboolean has_json_fields(MYSQL *conn, char *database, char *table) {
   MYSQL_RES *res = NULL;
   MYSQL_ROW row;
 
   gchar *query =
       g_strdup_printf("select COLUMN_NAME from information_schema.COLUMNS "
-                      "where TABLE_SCHEMA='%s' and TABLE_NAME='%s' ORDER BY ORDINAL_POSITION;",
+                      "where TABLE_SCHEMA='%s' and TABLE_NAME='%s' and "
+                      "COLUMN_TYPE ='json'",
                       database, table);
   mysql_query(conn, query);
   g_free(query);
 
-  GList *anonymized_function_list=NULL;
   res = mysql_store_result(conn);
+  if (res == NULL){
+    return FALSE;
+  }
+  row = mysql_fetch_row(res);
+  if (row != NULL){
+    mysql_free_result(res);
+    return TRUE;
+  }
+//  g_string_append(field_list, ")");
+  mysql_free_result(res);
+
+  return FALSE;
+}
+
+
+struct function_pointer ** get_anonymized_function_for(MYSQL *conn, gchar *database, gchar *table){
+  // TODO #364: this is the place where we need to link the column between file loaded and dbt.
+  // Currently, we are using identity_function, which return the same data.
+  // Key: `database`.`table`.`column`
   gchar * k = g_strdup_printf("`%s`.`%s`",database,table);
   GHashTable *ht = g_hash_table_lookup(conf_per_table.all_anonymized_function,k);
-  struct function_pointer *fp;
+  struct function_pointer ** anonymized_function_list=NULL;
   if (ht){
+
+    MYSQL_RES *res = NULL;
+    MYSQL_ROW row;
+
+    gchar *query =
+      g_strdup_printf("select COLUMN_NAME from information_schema.COLUMNS "
+                      "where TABLE_SCHEMA='%s' and TABLE_NAME='%s' ORDER BY ORDINAL_POSITION;",
+                      database, table);
+    mysql_query(conn, query);
+    g_free(query);
+
+    struct function_pointer *fp;
+    res = mysql_store_result(conn);
+    guint i=0;
+    anonymized_function_list = g_new0(struct function_pointer *, mysql_num_rows(res));
+    g_message("Using masquerade function on `%s`.`%s`", database, table);
     while ((row = mysql_fetch_row(res))) {
       fp=(struct function_pointer*)g_hash_table_lookup(ht,row[0]);
-      if (fp  != NULL){
-        anonymized_function_list=g_list_append(anonymized_function_list,fp);
+      if (fp != NULL){
+        g_message("Masquerade function found on `%s`.`%s`.`%s`", database, table, row[0]);
+        anonymized_function_list[i]=fp;
       }else{
-        anonymized_function_list=g_list_append(anonymized_function_list,&pp);
+        anonymized_function_list[i]=&pp;
       }
+      i++;
     }
+    mysql_free_result(res);
   }
-  mysql_free_result(res);
   g_free(k);
   return anonymized_function_list;
 }
@@ -1243,6 +1277,7 @@ struct db_table *new_db_table( MYSQL *conn, struct configuration *conf, struct d
   dbt->table = g_strdup(table);
   dbt->table_filename = get_ref_table(dbt->table);
   dbt->character_set = table_collation==NULL? NULL:get_character_set_from_collation(conn, table_collation);
+  dbt->has_json_fields = has_json_fields(conn, dbt->database->name, dbt->table);
   dbt->rows_lock= g_mutex_new();
   dbt->escaped_table = escape_string(conn,dbt->table);
   dbt->anonymized_function=get_anonymized_function_for(conn, dbt->database->name, dbt->table);
@@ -1324,7 +1359,7 @@ void new_table_to_dump(MYSQL *conn, struct configuration *conf, gboolean is_view
     }
     if (!no_data) {
       if (ecol != NULL && g_ascii_strcasecmp("MRG_MYISAM",ecol)) {
-        if (data_checksums) {
+        if (data_checksums && !( get_major() == 5 && get_secondary() == 7 && dbt->has_json_fields ) ){
           create_job_to_dump_checksum(dbt, conf);
         }
         if (trx_consistency_only ||
