@@ -35,7 +35,7 @@
 #include "myloader_restore_job.h"
 #include "myloader_global.h"
 
-
+GString *change_master_statement=NULL;
 gboolean append_if_not_exist=FALSE;
 
 struct configuration *conf;
@@ -70,7 +70,7 @@ struct db_table* append_new_db_table(char * filename, gchar * database, gchar *t
       dbt->restore_job_list = NULL;
 //      dbt->queue=g_async_queue_new();
       dbt->current_threads=0;
-      dbt->max_threads=max_threads_per_table;
+      dbt->max_threads=max_threads_per_table>num_threads?num_threads:max_threads_per_table;
       dbt->mutex=g_mutex_new();
       dbt->indexes=alter_table_statement;
       dbt->start_data_time=NULL;
@@ -165,7 +165,7 @@ struct control_job * load_schema(struct db_table *dbt, gchar *filename){
     if (read_data(infile, is_compressed, data, &eof,&line)) {
       if (g_strrstr(&data->str[data->len >= 5 ? data->len - 5 : 0], ";\n")) {
         if (g_strstr_len(data->str,13,"CREATE TABLE ")){
-          gchar** create_table= g_strsplit(data->str, "`", 3);
+          gchar** create_table= g_strsplit(data->str, identifier_quote_character_str, 3);
           dbt->real_table=g_strdup(create_table[1]);
           if ( g_str_has_prefix(dbt->table,"mydumper_")){
             g_hash_table_insert(tbl_hash, dbt->table, dbt->real_table);
@@ -315,7 +315,7 @@ gchar * get_database_name_from_content(const gchar *filename){
     if (read_data(infile, is_compressed, data, &eof, &line)) {
       if (g_strrstr(&data->str[data->len >= 5 ? data->len - 5 : 0], ";\n")) {
         if (g_str_has_prefix(data->str,"CREATE ")){
-          gchar** create= g_strsplit(data->str, "`", 3);
+          gchar** create= g_strsplit(data->str, identifier_quote_character_str, 3);
           real_database=g_strdup(create[1]);
           g_strfreev(create);
           break;
@@ -430,18 +430,6 @@ gboolean process_metadata_filename(char * filename){
   return TRUE;
 }
 
-
-gchar *get_value(GKeyFile * kf,gchar *group, const gchar *key){
-  GError *error=NULL;
-  gchar * checksum=g_key_file_get_value(kf,group,key,&error);
-  if (error != NULL && error->code == G_KEY_FILE_ERROR_KEY_NOT_FOUND){
-    g_error_free(error);
-    return NULL;
-  }
-  return g_strdup(checksum);
-}
-
-
 gboolean process_metadata_global(){
 //  void *infile;
   gchar *path = g_build_filename(directory, "metadata", NULL);
@@ -456,9 +444,11 @@ gboolean process_metadata_global(){
   gchar **groups=g_key_file_get_groups(kf, &length);
   gchar** database_table=NULL;
   struct db_table *dbt=NULL;
+  change_master_statement=g_string_new("");
+  gchar *delimiter=g_strdup_printf("%c.%c", identifier_quote_character,identifier_quote_character);
   for (j=0; j<length; j++){
     if (g_str_has_prefix(groups[j],"`")){
-      database_table= g_strsplit(groups[j]+1, "`.`", 2);
+      database_table= g_strsplit(groups[j]+1, delimiter, 2);
       if (database_table[1] != NULL){
         database_table[1][strlen(database_table[1])-1]='\0';
         dbt=append_new_db_table(NULL, database_table[0], database_table[1],0,NULL);
@@ -480,8 +470,13 @@ gboolean process_metadata_global(){
         database->schema_checksum=get_value(kf,groups[j],"schema_checksum");
         database->post_checksum=get_value(kf,groups[j],"post_checksum");
       }
+    }else if (g_str_has_prefix(groups[j],"replication")){
+      change_master(kf, groups[j], change_master_statement);
+    }else if (g_strstr_len(groups[j],6,"master")){
+      change_master(kf, groups[j], change_master_statement);
     }
   }
+  g_free(delimiter);
   return TRUE;
 }
 
