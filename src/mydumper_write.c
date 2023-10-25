@@ -232,13 +232,45 @@ void initialize_write(){
     insert_statement=REPLACE;
 }
 
+
+GString *append_load_data_columns(GString *statement, MYSQL_FIELD *fields, guint num_fields){
+  guint i = 0;
+  GString *str=g_string_new("SET ");
+  for (i = 0; i < num_fields; ++i) {
+    if (i > 0) {
+      g_string_append_c(statement, ',');
+    }
+//    g_string_append_printf(statement, "`%s`", fields[i].name);
+    if (fields[i].type == MYSQL_TYPE_JSON){
+      g_string_append_c(statement,'@');
+      g_string_append(statement, fields[i].name);
+      if (str->len > 4)
+        g_string_append_c(str, ',');
+      g_string_append_c(str,'`');
+      g_string_append(str,fields[i].name);
+      g_string_append(str,"`=CONVERT(@");
+      g_string_append(str, fields[i].name);
+      g_string_append(str, " USING UTF8MB4)");
+    }else{
+      g_string_append_c(statement,'`');
+      g_string_append(statement, fields[i].name);
+      g_string_append_c(statement,'`');
+    }
+  }
+  if (str->len > 4)
+    return str;
+  else{
+    g_string_free(str,TRUE);
+    return NULL;
+  }
+}
+
 void append_columns (GString *statement, MYSQL_FIELD *fields, guint num_fields){
   guint i = 0;
   for (i = 0; i < num_fields; ++i) {
     if (i > 0) {
       g_string_append_c(statement, ',');
     }
-//    g_string_append_printf(statement, "`%s`", fields[i].name);
     g_string_append_c(statement,'`');
     g_string_append(statement, fields[i].name);    
     g_string_append_c(statement,'`');
@@ -298,7 +330,7 @@ gboolean write_data(FILE *file, GString *data) {
 
 void initialize_load_data_statement(GString *statement, gchar * table, const gchar *character_set, gchar *basename, MYSQL_FIELD * fields, guint num_fields){
   g_string_append_printf(statement, "LOAD DATA LOCAL INFILE '%s' REPLACE INTO TABLE `%s` ", basename, table);
-  if (character_set)
+  if (character_set && strlen(character_set)!=0)
     g_string_append_printf(statement, "CHARACTER SET %s ",character_set);
   if (fields_terminated_by_ld)
     g_string_append_printf(statement, "FIELDS TERMINATED BY '%s' ",fields_terminated_by_ld);
@@ -310,8 +342,13 @@ void initialize_load_data_statement(GString *statement, gchar * table, const gch
   if (lines_starting_by_ld)
     g_string_append_printf(statement, "STARTING BY '%s' ",lines_starting_by_ld);
   g_string_append_printf(statement, "TERMINATED BY '%s' (", lines_terminated_by_ld);
-  append_columns(statement,fields,num_fields);
-  g_string_append(statement,");\n");
+  GString * set_statement=append_load_data_columns(statement,fields,num_fields);
+  g_string_append(statement,")");
+  if (set_statement != NULL){
+    g_string_append(statement,set_statement->str);
+    g_string_free(set_statement,TRUE);
+  }
+  g_string_append(statement,";\n");
 }
 
 gboolean write_statement(FILE *load_data_file, float *filessize, GString *statement, struct db_table * dbt){
@@ -327,7 +364,7 @@ gboolean write_load_data_statement(struct table_job * tj, MYSQL_FIELD *fields, g
   GString *statement = g_string_sized_new(statement_size);
   char * basename=g_path_get_basename(tj->dat_filename);
   initialize_sql_statement(statement);
-  initialize_load_data_statement(statement, tj->dbt->table, "BINARY", basename, fields, num_fields);
+  initialize_load_data_statement(statement, tj->dbt->table, set_names_str != NULL ? set_names_str : tj->dbt->character_set /* "BINARY"*/, basename, fields, num_fields);
   if (!write_data(tj->sql_file, statement)) {
     g_critical("Could not write out data for %s.%s", tj->dbt->database->name, tj->dbt->table);
     return FALSE;
@@ -424,8 +461,12 @@ guint64 write_row_into_file_in_load_data_mode(MYSQL *conn, MYSQL_RES *result, st
   GString *statement = g_string_sized_new(2*statement_size);
 //  guint sections = tj->where==NULL?1:2;
 
-  update_files_on_table_job(tj);
-  write_load_data_statement(tj, fields, num_fields);
+//  if (tj->sql_filename == NULL){
+  if (update_files_on_table_job(tj)){
+    write_load_data_statement(tj, fields, num_fields);
+  }
+//    write_load_data_statement(tj, fields, num_fields);
+//  }
 
   while ((row = mysql_fetch_row(result))) {
     gulong *lengths = mysql_fetch_lengths(result);
@@ -459,7 +500,9 @@ guint64 write_row_into_file_in_load_data_mode(MYSQL *conn, MYSQL_RES *result, st
         tj->sub_part++;
 //      }
 
-      update_files_on_table_job(tj);
+      if (update_files_on_table_job(tj)){
+        write_load_data_statement(tj, fields, num_fields);
+      }
       tj->st_in_file = 0;
       tj->filesize = 0;
       

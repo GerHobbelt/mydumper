@@ -139,7 +139,7 @@ extern GList *schema_post;
 extern gint non_innodb_done;
 guint less_locking_threads = 0;
 extern guint trx_consistency_only;
-extern gchar *set_names_str;
+extern gchar *set_names_statement;
 
 extern struct configuration_per_table conf_per_table;
 
@@ -953,10 +953,10 @@ void update_where_on_table_job(struct thread_data *td, struct table_job *tj){
   switch (tj->dbt->chunk_type){
     case INTEGER:
       tj->where=tj->chunk_step->integer_step.nmin == tj->chunk_step->integer_step.nmax ?
-                g_strdup_printf("%s( `%s` = %"G_GUINT64_FORMAT")",
+                g_strdup_printf("(%s ( `%s` = %"G_GUINT64_FORMAT"))",
                           tj->chunk_step->integer_step.prefix?tj->chunk_step->integer_step.prefix:"",
                           tj->chunk_step->integer_step.field, tj->chunk_step->integer_step.cursor):
-                g_strdup_printf("%s( %"G_GUINT64_FORMAT" < `%s` AND `%s` <= %"G_GUINT64_FORMAT")",
+                g_strdup_printf("( %s ( %"G_GUINT64_FORMAT" < `%s` AND `%s` <= %"G_GUINT64_FORMAT"))",
                           tj->chunk_step->integer_step.prefix?tj->chunk_step->integer_step.prefix:"",
                           tj->chunk_step->integer_step.nmin, tj->chunk_step->integer_step.field,
                           tj->chunk_step->integer_step.field, tj->chunk_step->integer_step.cursor);
@@ -964,13 +964,13 @@ void update_where_on_table_job(struct thread_data *td, struct table_job *tj){
   case CHAR:
     if (td != NULL){
       if (tj->chunk_step->char_step.cmax == NULL){
-        tj->where=g_strdup_printf("%s(`%s` >= '%s')",
+        tj->where=g_strdup_printf("(%s(`%s` >= '%s'))",
                           tj->chunk_step->char_step.prefix?tj->chunk_step->char_step.prefix:"",
                           tj->chunk_step->char_step.field, tj->chunk_step->char_step.cmin_escaped
                           );
       }else{
         update_cursor(td->thrconn,tj);
-        tj->where=g_strdup_printf("%s('%s' < `%s` AND `%s` <= '%s')",
+        tj->where=g_strdup_printf("(%s('%s' < `%s` AND `%s` <= '%s'))",
                           tj->chunk_step->char_step.prefix?tj->chunk_step->char_step.prefix:"",
                           tj->chunk_step->char_step.cmin_escaped, tj->chunk_step->char_step.field,
                           tj->chunk_step->char_step.field, tj->chunk_step->char_step.cursor_escaped
@@ -1163,9 +1163,9 @@ void *working_thread(struct thread_data *td) {
     initialize_consistent_snapshot(td);
     check_connection_status(td);
   }
-  if (set_names_str){
-    mysql_query(td->thrconn, set_names_str);
-  }
+/*  if (set_names_statement){
+    mysql_query(td->thrconn, set_names_statement);
+  }*/
 
   g_async_queue_push(td->conf->ready, GINT_TO_POINTER(1));
   // Thread Ready to process jobs

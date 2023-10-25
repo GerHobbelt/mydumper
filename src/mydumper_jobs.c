@@ -47,7 +47,7 @@ extern int (*m_close)(void *file);
 extern guint errors;
 extern guint statement_size;
 extern int skip_tz;
-extern gchar *set_names_str;
+extern gchar *set_names_statement;
 extern GAsyncQueue *stream_queue;
 extern gboolean stream;
 extern gboolean dump_routines;
@@ -429,8 +429,8 @@ void write_view_definition_into_file(MYSQL *conn, char *database, char *table, c
     return;
   }
 
-  if (detected_server == SERVER_TYPE_MYSQL && set_names_str) {
-    g_string_printf(statement,"%s;\n",set_names_str);
+  if (detected_server == SERVER_TYPE_MYSQL && set_names_statement) {
+    g_string_printf(statement,"%s;\n",set_names_statement);
   }
 
   if (!write_data((FILE *)outfile, statement)) {
@@ -993,19 +993,19 @@ void initialize_sql_fn(struct table_job * tj){
 void initialize_load_data_fn(struct table_job * tj){
   initialize_fn(&(tj->dat_filename),tj->dbt,&(tj->dat_file), tj->nchunk, tj->sub_part,"dat", &build_load_data_filename);
 }
-
-void update_files_on_table_job(struct table_job *tj){
+gboolean update_files_on_table_job(struct table_job *tj){
   if (tj->sql_file == NULL){
      if (load_data){
        initialize_load_data_fn(tj);
        tj->sql_filename = build_data_filename(tj->dbt->database->filename, tj->dbt->table_filename, tj->nchunk, tj->sub_part);
        tj->sql_file = m_open(tj->sql_filename,"w");
+       return TRUE;
      }else{
        initialize_sql_fn(tj);
      }
 //     write_load_data_statement(tj, fields, num_fields);
   }
-
+  return FALSE;
 }
 
 
@@ -1032,7 +1032,7 @@ struct table_job * new_table_job(struct db_table *dbt, char *partition, guint nc
   tj->char_chunk_part=char_chunk;
   if (update_where)
     update_where_on_table_job(NULL, tj);
-  update_files_on_table_job(tj);
+//  update_files_on_table_job(tj);
   return tj;
 }
 
