@@ -319,8 +319,8 @@ int main(int argc, char *argv[]) {
     read_tables_skiplist(tables_skiplist_file, &errors);
   initialize_process(&conf);
   initialize_common();
-  initialize_connection(key_file!=NULL && g_key_file_has_group(key_file,"myloader")?defaults_file:NULL);
-  initialize_regex();
+  initialize_connection(key_file!=NULL && g_key_file_has_group(key_file,"myloader")?defaults_file:NULL, key_file!=NULL && g_key_file_has_group(key_file,"myloader")?MYLOADER:NULL , MYLOADER);
+  initialize_regex(NULL);
   GError *serror;
   GThread *sthread =
       g_thread_create(signal_thread, &conf, FALSE, &serror);
@@ -331,7 +331,7 @@ int main(int argc, char *argv[]) {
 
   MYSQL *conn;
   conn = mysql_init(NULL);
-  m_connect(conn,"myloader",NULL);
+  m_connect(conn,NULL);
 
   set_session = g_string_new(NULL);
   set_global = g_string_new(NULL);
@@ -356,12 +356,12 @@ int main(int argc, char *argv[]) {
 //  }
 
   if (disable_redo_log){
-    if ((get_major() == 8) && (get_secondary() > 21)){
+    if ((get_major() == 8) && (get_secondary() == 0) && (get_revision() > 21)){
       g_message("Disabling redologs");
       m_query(conn, "ALTER INSTANCE DISABLE INNODB REDO_LOG", m_critical, "DISABLE INNODB REDO LOG failed");
 //      mysql_query(conn, "ALTER INSTANCE DISABLE INNODB REDO_LOG");
     }else{
-      m_error("Disabling redologs is not supported for version %d.%d", get_major(), get_secondary());
+      m_error("Disabling redologs is not supported for version %d.%d.%d", get_major(), get_secondary(), get_revision());
     }
   }
 //  mysql_query(conn, "/*!40014 SET FOREIGN_KEY_CHECKS=0*/");

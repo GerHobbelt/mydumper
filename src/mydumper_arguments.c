@@ -130,13 +130,13 @@ static GOptionEntry daemon_entries[] = {
 
 static GOptionEntry chunks_entries[] = {
     {"max-rows", 0, 0, G_OPTION_ARG_INT64, &max_rows,
-     "Limit the number of rows per block after the table is estimated, default 1000000", NULL},
+     "Limit the number of rows per block after the table is estimated, default 1000000. It has been deprecated, use --rows instead. Removed in future releases", NULL},
     {"char-deep", 0, 0, G_OPTION_ARG_INT64, &char_deep,
      "",NULL},
     {"char-chunk", 0, 0, G_OPTION_ARG_INT64, &char_chunk,
      "",NULL},
     {"rows", 'r', 0, G_OPTION_ARG_STRING, &rows_per_chunk,
-     "Try to split tables into chunks of this many rows.",
+     "Spliting tables into chunks of this many rows. It can be MIN:START_AT:MAX. MAX can be 0 which means that there is no limit. It will double the chunk size if query takes less than 1 second and half of the size if it is more than 2 seconds",
      NULL},
     { "split-partitions", 0, 0, G_OPTION_ARG_NONE, &split_partitions,
       "Dump partitions into separate files. This options overrides the --rows option for partitioned tables.", NULL},
@@ -163,6 +163,8 @@ static GOptionEntry filter_entries[] = {
       "Dump only selected records.", NULL },
     {"updated-since", 'U', 0, G_OPTION_ARG_INT, &updated_since,
      "Use Update_time to dump only tables updated in the last U days", NULL},
+    { "partition-regex", 0, 0, G_OPTION_ARG_STRING, &partition_regex,
+      "Regex to filter by partition name.", NULL },
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
 
 static GOptionEntry objects_entries[] = {
