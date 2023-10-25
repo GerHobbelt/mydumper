@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.12)
 project(mydumper)
-set(VERSION 0.14.4-1)
+set(VERSION 0.14.4-5)
 set(ARCHIVE_NAME "${CMAKE_PROJECT_NAME}-${VERSION}")
 
 #Required packages
@@ -93,6 +93,11 @@ endif (WITH_ZSTD)
 
 INSTALL(TARGETS mydumper myloader
   RUNTIME DESTINATION bin
+)
+
+INSTALL(FILES mydumper.cnf
+  DESTINATION /etc
+  COMPONENT config
 )
 
 add_custom_target(dist
