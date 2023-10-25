@@ -57,6 +57,7 @@ struct configuration {
   GAsyncQueue *post_data_queue;
   GAsyncQueue *ready;
   GAsyncQueue *ready_non_innodb_queue;
+  GAsyncQueue *db_ready;
   GAsyncQueue *unlock_tables;
   GAsyncQueue *pause_resume;
   GAsyncQueue *gtid_pos_checked;
@@ -69,6 +70,7 @@ struct configuration {
 struct thread_data {
   struct configuration *conf;
   guint thread_id;
+  char *table_name;
   MYSQL *thrconn;
   gboolean less_locking_stage;
   gchar *binlog_snapshot_gtid_executed;

@@ -185,11 +185,15 @@ void initialize_working_thread(){
 
 
   /* savepoints workaround to avoid metadata locking issues
-     doesnt work for chuncks */
-  if (rows_per_file && use_savepoints) {
+     doesnt work for chuncks 
+
+     UPDATE: this is not true anymore
+   */
+/*  if (rows_per_file && use_savepoints) {
     use_savepoints = FALSE;
     g_warning("--use-savepoints disabled by --rows");
   }
+*/
 
   /* Give ourselves an array of engines to ignore */
   if (ignore_engines)
@@ -286,7 +290,8 @@ void thd_JOB_DUMP_ALL_DATABASES( struct thread_data *td, struct job *job){
     create_job_to_dump_database(db_tmp, td->conf);
   }
   if (g_atomic_int_dec_and_test(&database_counter)) {
-    g_rec_mutex_unlock(ready_database_dump_mutex);
+//    g_rec_mutex_unlock(ready_database_dump_mutex);
+    g_async_queue_push(td->conf->db_ready,GINT_TO_POINTER(1));
   }
   mysql_free_result(databases);
   g_free(job);
@@ -300,7 +305,8 @@ void thd_JOB_DUMP_DATABASE(struct thread_data *td, struct job *job){
   g_free(ddj);
   g_free(job);
   if (g_atomic_int_dec_and_test(&database_counter)) {
-    g_rec_mutex_unlock(ready_database_dump_mutex);
+    g_async_queue_push(td->conf->db_ready,GINT_TO_POINTER(1));
+//    g_rec_mutex_unlock(ready_database_dump_mutex);
   }
 }
 
@@ -384,7 +390,8 @@ void get_table_info_to_process_from_list(MYSQL *conn, struct configuration *conf
 
   g_free(query);
   if (g_atomic_int_dec_and_test(&database_counter)) {
-    g_rec_mutex_unlock(ready_database_dump_mutex);
+    g_async_queue_push(conf->db_ready,GINT_TO_POINTER(1));
+//    g_rec_mutex_unlock(ready_database_dump_mutex);
   }
 
 }
@@ -424,8 +431,24 @@ void process_partition_chunk(struct thread_data *td, struct table_job *tj);
 
 void thd_JOB_DUMP(struct thread_data *td, struct job *job){
   struct table_job *tj = (struct table_job *)job->job_data;
-  if (use_savepoints && mysql_query(td->thrconn, "SAVEPOINT mydumper")) {
-    g_critical("Savepoint failed: %s", mysql_error(td->thrconn));
+
+  if (use_savepoints){
+    if (td->table_name!=NULL){
+      if (tj->dbt->table != td->table_name){
+        if ( mysql_query(td->thrconn, "ROLLBACK TO SAVEPOINT mydumper")) {
+          g_critical("Rollback to savepoint failed: %s", mysql_error(td->thrconn));
+        }
+        if (mysql_query(td->thrconn, "SAVEPOINT mydumper")) {
+          g_critical("Savepoint failed: %s", mysql_error(td->thrconn));
+        }
+        td->table_name = tj->dbt->table;
+      }
+    }else{
+      if (mysql_query(td->thrconn, "SAVEPOINT mydumper")) {
+        g_critical("Savepoint failed: %s", mysql_error(td->thrconn));
+      }
+      td->table_name = tj->dbt->table;
+    }
   }
   tj->td=td;
   switch (tj->dbt->chunk_type) {
@@ -475,10 +498,10 @@ void thd_JOB_DUMP(struct thread_data *td, struct job *job){
       }
   }
 
-  if (use_savepoints &&
+/*  if (use_savepoints &&
       mysql_query(td->thrconn, "ROLLBACK TO SAVEPOINT mydumper")) {
     g_critical("Rollback to savepoint failed: %s", mysql_error(td->thrconn));
-  }
+  }*/
   tj->td=NULL;
 //  free_table_job(tj);
   g_free(job);
@@ -601,7 +624,7 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
     masterpos = row[1];
     /* Oracle/Percona GTID */
     if (mysql_num_fields(master) == 5) {
-      mastergtid = row[4];
+      mastergtid = remove_new_line(row[4]);
     } else {
       /* Let's try with MariaDB 10.x */
       /* Use gtid_binlog_pos due to issue with gtid_current_pos with galera
@@ -610,7 +633,7 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
       mysql_query(conn, "SELECT @@gtid_binlog_pos");
       mdb = mysql_store_result(conn);
       if (mdb && (row = mysql_fetch_row(mdb))) {
-        mastergtid = row[0];
+        mastergtid = remove_new_line(row[0]);
       }
     }
   }
@@ -660,17 +683,17 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
         slavehost = row[i];
       } else if (!strcasecmp("Executed_Gtid_Set", fields[i].name)){
         gtid_title="Executed_Gtid_Set";  
-        slavegtid = row[i];
+        slavegtid = remove_new_line(row[i]);
       } else if (!strcasecmp("Gtid_Slave_Pos", fields[i].name)) {
         gtid_title="Gtid_Slave_Pos";
-        slavegtid = row[i];
+        slavegtid = remove_new_line(row[i]);
       } else if (!strcasecmp("Channel_Name", fields[i].name) && strlen(row[i]) > 1) {
         channel_name = row[i];
       }
       g_string_append_printf(replication_section_str,"# %s = ", fields[i].name);
       (fields[i].type != MYSQL_TYPE_LONG && fields[i].type != MYSQL_TYPE_LONGLONG  && fields[i].type != MYSQL_TYPE_INT24  && fields[i].type != MYSQL_TYPE_SHORT )  ?
-      g_string_append_printf(replication_section_str,"'%s'\n", row[i]):
-      g_string_append_printf(replication_section_str,"%s\n", row[i]);
+      g_string_append_printf(replication_section_str,"'%s'\n", remove_new_line(row[i])):
+      g_string_append_printf(replication_section_str,"%s\n", remove_new_line(row[i]));
     }
     if (slavehost) {
       slave_count++;
@@ -1076,6 +1099,11 @@ void *working_thread(struct thread_data *td) {
   //  start_processing(td, resume_mutex);
   }else{
     g_async_queue_push(td->conf->unlock_tables, GINT_TO_POINTER(1));
+  }
+
+  if (use_savepoints && td->table_name != NULL &&
+      mysql_query(td->thrconn, "ROLLBACK TO SAVEPOINT mydumper")) {
+    g_critical("Rollback to savepoint failed: %s", mysql_error(td->thrconn));
   }
 
   process_queue(td->conf->post_data_queue, td, process_job, NULL);

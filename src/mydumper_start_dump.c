@@ -114,7 +114,7 @@ guint pause_at=0;
 guint resume_at=0;
 gchar **db_items=NULL;
 
-GRecMutex *ready_database_dump_mutex = NULL;
+//GRecMutex *ready_database_dump_mutex = NULL;
 GRecMutex *ready_table_dump_mutex = NULL;
 
 struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL};
@@ -679,7 +679,7 @@ void start_dump() {
   MYSQL *conn = create_main_connection();
   main_connection = conn;
   MYSQL *second_conn = conn;
-  struct configuration conf = {1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0};
+  struct configuration conf = {1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0};
   char *metadata_partial_filename, *metadata_filename;
   char *u;
   detect_server_version(conn);
@@ -869,8 +869,9 @@ void start_dump() {
   conf.unlock_tables = g_async_queue_new();
   conf.gtid_pos_checked = g_async_queue_new();
   conf.are_all_threads_in_same_pos = g_async_queue_new();
-  ready_database_dump_mutex = g_rec_mutex_new();
-  g_rec_mutex_lock(ready_database_dump_mutex);
+  conf.db_ready = g_async_queue_new();
+//  ready_database_dump_mutex = g_rec_mutex_new();
+//  g_rec_mutex_lock(ready_database_dump_mutex);
   ready_table_dump_mutex = g_rec_mutex_new();
   g_rec_mutex_lock(ready_table_dump_mutex);
 
@@ -917,6 +918,7 @@ void start_dump() {
     td[n].less_locking_stage = FALSE;
     td[n].binlog_snapshot_gtid_executed = NULL;
     td[n].pause_resume_mutex=NULL;
+    td[n].table_name=NULL;
     threads[n] =
         g_thread_create((GThreadFunc)working_thread, &td[n], TRUE, NULL);
  //   g_async_queue_pop(conf.ready);
@@ -959,8 +961,9 @@ void start_dump() {
 
   
   g_message("Waiting database finish");
-  if (database_counter > 0)
-    g_rec_mutex_lock(ready_database_dump_mutex);
+//  if (database_counter > 0)
+//    g_rec_mutex_lock(ready_database_dump_mutex);
+  g_async_queue_pop(conf.db_ready);
   g_list_free(no_updated_tables);
 
   for (n = 0; n < num_threads; n++) {
@@ -1050,7 +1053,7 @@ void start_dump() {
   for (iter = all_dbts; iter != NULL; iter = iter->next) {
     dbt = (struct db_table *)iter->data;
 //    write_table_metadata_into_file(dbt);
-    fprintf(mdfile,"\n[`%s`.`%s`]\nRows = %"G_GINT64_FORMAT"\n", dbt->database->name, dbt->table, dbt->rows);
+    fprintf(mdfile,"\n[`%s`.`%s`]\nRows = %"G_GINT64_FORMAT"\n", dbt->database->name, dbt->table_filename, dbt->rows);
     if (dbt->data_checksum)
       fprintf(mdfile,"data_checksum = %s\n", dbt->data_checksum);
     if (dbt->schema_checksum)
