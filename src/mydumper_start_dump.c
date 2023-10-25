@@ -1026,14 +1026,14 @@ void start_dump() {
   all_dbts = g_list_reverse(all_dbts);
   for (iter = all_dbts; iter != NULL; iter = iter->next) {
     dbt = (struct db_table *)iter->data;
-    write_table_metadata_into_file(dbt);
+//    write_table_metadata_into_file(dbt);
     fprintf(mdfile,"\n[`%s`.`%s`]\nRows = %"G_GINT64_FORMAT"\n", dbt->database->name, dbt->table, dbt->rows);
     if (dbt->schema_checksum)
       fprintf(mdfile,"schema_checksum = %s\n", dbt->schema_checksum);
     if (dbt->indexes_checksum)
       fprintf(mdfile,"indexes_checksum = %s\n", dbt->indexes_checksum);
     if (dbt->triggers_checksum)
-      fprintf(mdfile,"indexes_checksum = %s\n", dbt->triggers_checksum);
+      fprintf(mdfile,"triggers_checksum = %s\n", dbt->triggers_checksum);
 //    free_db_table(dbt);
   }
 
