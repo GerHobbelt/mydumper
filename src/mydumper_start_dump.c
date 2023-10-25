@@ -322,6 +322,7 @@ MYSQL *create_main_connection() {
     break;
   case SERVER_TYPE_TIDB:
     g_message("Connected to a TiDB server");
+    data_checksums=FALSE;
     break;
   default:
     m_critical("Cannot detect server type");
@@ -775,15 +776,8 @@ void start_dump() {
     }
 
     // Need to set the @@tidb_snapshot for the master thread
-    gchar *query =
-        g_strdup_printf("SET SESSION tidb_snapshot = '%s'", tidb_snapshot);
-
+    set_tidb_snapshot(conn);
     g_message("Set to tidb_snapshot '%s'", tidb_snapshot);
-
-    if (mysql_query(conn, query)) {
-      m_critical("Failed to set tidb_snapshot: %s", mysql_error(conn));
-    }
-    g_free(query);
 
   }else{
 
@@ -900,6 +894,8 @@ void start_dump() {
     guint i=0;
     for (i=0;i<g_strv_length(db_items);i++){
       struct database *this_db=new_database(conn,db_items[i],TRUE);
+      if (this_db->dump_triggers)
+        create_job_to_dump_schema_triggers(this_db, &conf);
       create_job_to_dump_database(this_db, &conf);
       if (!no_schemas)
         create_job_to_dump_schema(this_db, &conf);

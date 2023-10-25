@@ -254,6 +254,9 @@ struct control_job * load_schema(struct db_table *dbt, gchar *filename){
 
 void get_database_table_part_name_from_filename(const gchar *filename, gchar **database, gchar **table, guint *part, guint *sub_part){
   guint l = strlen(filename)-4;
+  if (exec_per_thread_extension!=NULL && g_str_has_suffix(filename, exec_per_thread_extension)) {
+    l-=strlen(exec_per_thread_extension);
+  }
   if (g_str_has_suffix(filename, compress_extension)) {
     l-=strlen(compress_extension);
   }
@@ -301,7 +304,7 @@ void get_database_table_name_from_filename(const gchar *filename, const gchar * 
 
 gchar * get_database_name_from_content(const gchar *filename){
   FILE *infile;
-  gboolean is_compressed = FALSE;
+  enum data_file_type is_compressed = FALSE;
   gboolean eof = FALSE;
   GString *data=g_string_sized_new(512);
   ml_open(&infile,filename,&is_compressed);
@@ -479,6 +482,7 @@ gboolean process_metadata_global(){
         struct database *database=get_db_hash(database_table[0],database_table[0]);
         database->schema_checksum=get_value(kf,groups[j],"schema_checksum");
         database->post_checksum=get_value(kf,groups[j],"post_checksum");
+        database->triggers_checksum=get_value(kf,groups[j],"triggers_checksum");
       }
     }else if (g_str_has_prefix(groups[j],"replication")){
       change_master(kf, groups[j], change_master_statement);

@@ -104,13 +104,15 @@ char * checksum_table_structure(MYSQL *conn, char *database, char *table, int *e
 }
 
 char * checksum_process_structure(MYSQL *conn, char *database, char *table, int *errn){
-  (void) table;
-  (void) errn;
   return generic_checksum(conn, database, table, errn,"SELECT COALESCE(LOWER(CONV(BIT_XOR(CAST(CRC32(replace(ROUTINE_DEFINITION,' ','')) AS UNSIGNED)), 10, 16)), 0) AS crc FROM information_schema.routines WHERE ROUTINE_SCHEMA='%s' order by ROUTINE_TYPE,ROUTINE_NAME", 0);
 }
 
 char * checksum_trigger_structure(MYSQL *conn, char *database, char *table, int *errn){
   return generic_checksum(conn, database, table, errn,"SELECT COALESCE(LOWER(CONV(BIT_XOR(CAST(CRC32(REPLACE(REPLACE(REPLACE(REPLACE(ACTION_STATEMENT, CHAR(32), ''), CHAR(13), ''), CHAR(10), ''), CHAR(9), '')) AS UNSIGNED)), 10, 16)), 0) AS crc FROM information_schema.triggers WHERE EVENT_OBJECT_SCHEMA='%s' AND EVENT_OBJECT_TABLE='%s';",0);
+}
+
+char * checksum_trigger_structure_from_database(MYSQL *conn, char *database, char *table, int *errn){
+  return generic_checksum(conn, database, table, errn,"SELECT COALESCE(LOWER(CONV(BIT_XOR(CAST(CRC32(REPLACE(REPLACE(REPLACE(REPLACE(ACTION_STATEMENT, CHAR(32), ''), CHAR(13), ''), CHAR(10), ''), CHAR(9), '')) AS UNSIGNED)), 10, 16)), 0) AS crc FROM information_schema.triggers WHERE EVENT_OBJECT_SCHEMA='%s';",0);
 }
 
 char * checksum_view_structure(MYSQL *conn, char *database, char *table, int *errn){
@@ -494,7 +496,7 @@ void initialize_common_options(GOptionContext *context, const gchar *group){
 
   key_file=load_config_file(defaults_file);
 
-  if (g_key_file_has_group(key_file, group )){
+  if (key_file!=NULL && g_key_file_has_group(key_file, group )){
     parse_key_file_group(key_file, context, group);
     set_connection_defaults_file_and_group(defaults_file, group); 
   }else
@@ -511,7 +513,7 @@ void initialize_common_options(GOptionContext *context, const gchar *group){
 
   GKeyFile * extra_key_file=load_config_file(defaults_extra_file);
 
-  if (g_key_file_has_group(extra_key_file, group )){
+  if (extra_key_file!=NULL && g_key_file_has_group(extra_key_file, group )){
     g_message("Parsing extra key file");
     parse_key_file_group(extra_key_file, context, group);
     set_connection_defaults_file_and_group(defaults_extra_file, group);
@@ -672,30 +674,34 @@ GRecMutex * g_rec_mutex_new(){
 
 }
 
-gboolean read_data(FILE *file, gboolean is_compressed, GString *data,
+gboolean read_data(FILE *file, enum data_file_type dft, GString *data,
                    gboolean *eof, guint *line) {
   char buffer[256];
 
   do {
-    if (!is_compressed) {
-      if (fgets(buffer, 256, file) == NULL) {
-        if (feof(file)) {
-          *eof = TRUE;
-          buffer[0] = '\0';
-        } else {
-          return FALSE;
+    switch (dft){
+      case FIFO:
+      case COMMON: 
+        if (fgets(buffer, 256, file) == NULL) {
+          if (feof(file)) {
+            *eof = TRUE;
+            buffer[0] = '\0';
+          } else {
+            return FALSE;
+          }
         }
-      }
-    } else {
-      if (!gzgets((gzFile)file, buffer, 256)) {
-        if (gzeof((gzFile)file)) {
-          *eof = TRUE;
-          buffer[0] = '\0';
-        } else {
-          return FALSE;
+      break;
+      case COMPRESSED:
+        if (!gzgets((gzFile)file, buffer, 256)) {
+          if (gzeof((gzFile)file)) {
+            *eof = TRUE;
+            buffer[0] = '\0';
+          } else {
+            return FALSE;
+          }
         }
+      break;
       }
-    }
     g_string_append(data, buffer);
     if (strlen(buffer) != 256)
       (*line)++;

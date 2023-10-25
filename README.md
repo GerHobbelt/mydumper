@@ -91,6 +91,7 @@ zypper install glib2-devel libmysqlclient-devel pcre-devel zlib-devel
 sudo port install glib2 pcre
 ```
 ### Install MySQL/Percona/MariaDB development versions:
+You need to select one vendor development library.
 * Ubuntu or Debian:
 ```shell
 apt-get install libmysqlclient-dev
@@ -131,7 +132,7 @@ Binlog dump is disabled by default to compile with it you need to add -DWITH_BIN
 To build against mysql libs < 5.7 you need to disable SSL adding -DWITH_SSL=OFF
 
 ### Build Docker image
-You can build the Docker image either from local sources or directly from Github sources with [the provided Dockerfile](./Dockerfile).
+You can download the [official docker image](https://hub.docker.com/r/mydumper/mydumper) or you can build the Docker image either from local sources or directly from Github sources with [the provided Dockerfile](./Dockerfile).
 ```shell
 docker build --build-arg CMAKE_ARGS='-DWITH_ZSTD=ON' -t mydumper github.com/mydumper/mydumper
 ```

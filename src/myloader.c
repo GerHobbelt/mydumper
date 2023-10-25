@@ -340,7 +340,7 @@ int main(int argc, char *argv[]) {
   detect_server_version(conn);
   GHashTable * set_session_hash = myloader_initialize_hash_of_session_variables();
   GHashTable * set_global_hash = g_hash_table_new ( g_str_hash, g_str_equal );
-  if (defaults_file){
+  if (key_file != NULL ){
     load_hash_of_all_variables_perproduct_from_key_file(key_file,set_global_hash,"myloader_global_variables");
     load_hash_of_all_variables_perproduct_from_key_file(key_file,set_session_hash,"myloader_session_variables");
   }
@@ -459,6 +459,8 @@ int main(int argc, char *argv[]) {
       checksum_database_template(d->name, d->schema_checksum,  conn, "Schema create checksum", checksum_database_defaults);
     if (d->post_checksum != NULL)
       checksum_database_template(d->name, d->post_checksum,  conn, "Post checksum", checksum_process_structure);
+    if (d->triggers_checksum != NULL)
+      checksum_database_template(d->name, d->triggers_checksum,  conn, "Triggers checksum", checksum_trigger_structure_from_database);
   }
 
 
@@ -508,7 +510,7 @@ int main(int argc, char *argv[]) {
 //    g_thread_join(pmmthread);
   }
 
-  g_hash_table_foreach(conf.table_hash,&show_dbt, NULL);
+//  g_hash_table_foreach(conf.table_hash,&show_dbt, NULL);
   free_table_hash(conf.table_hash);
   g_hash_table_remove_all(conf.table_hash);
   g_hash_table_unref(conf.table_hash);
