@@ -6,7 +6,7 @@ orbs:
 
 executors:
 
-  ubuntu1804_percona57:
+  bionic_percona57:
     docker:
     - image: cimg/base:current-18.04
       environment:
@@ -22,7 +22,7 @@ executors:
         MYSQL_ALLOW_EMPTY_PASSWORD: true
     working_directory: /tmp/src/mydumper
 
-  ubuntu1804_percona80:
+  bionic_percona80:
     docker:
     - image: cimg/base:current-18.04
       environment:
@@ -38,7 +38,7 @@ executors:
         MYSQL_ALLOW_EMPTY_PASSWORD: true
     working_directory: /tmp/src/mydumper
 
-  ubuntu2004_percona57:
+  focal_percona57:
     docker:
     - image: cimg/base:stable-20.04
       environment:
@@ -54,7 +54,7 @@ executors:
         MYSQL_ALLOW_EMPTY_PASSWORD: true
     working_directory: /tmp/src/mydumper
 
-  ubuntu2004_percona80:
+  focal_percona80:
     docker:
     - image: cimg/base:stable-20.04
       environment:
@@ -70,7 +70,7 @@ executors:
         MYSQL_ALLOW_EMPTY_PASSWORD: true
     working_directory: /tmp/src/mydumper
 
-  ubuntu2204_percona57:
+  jammy_percona57:
     docker:
     - image: cimg/base:current-22.04
       environment:
@@ -86,7 +86,7 @@ executors:
         MYSQL_ALLOW_EMPTY_PASSWORD: true
     working_directory: /tmp/src/mydumper
 
-  ubuntu2204_percona80:
+  jammy_percona80:
     docker:
     - image: cimg/base:current-22.04
       environment:
@@ -276,19 +276,19 @@ commands:
     - run: yum -y install cmake gcc-c++ git make glib2-devel zlib-devel pcre-devel openssl-devel libzstd-devel
     - run: yum -y install wget
 
-  prepare_ubuntu1804_percona_package:
+  prepare_bionic_percona_package:
     steps:
 
     - run: wget https://repo.percona.com/apt/percona-release_latest.bionic_all.deb
     - run: sudo apt install -y ./percona-release_latest.bionic_all.deb
 
-  prepare_ubuntu2004_percona_package:
+  prepare_focal_percona_package:
     steps:
 
     - run: wget https://repo.percona.com/apt/percona-release_latest.focal_all.deb
     - run: sudo apt install -y ./percona-release_latest.focal_all.deb
 
-  prepare_ubuntu2204_percona_package:
+  prepare_jammy_percona_package:
     steps:
 
     - run: wget https://repo.percona.com/apt/percona-release_latest.jammy_all.deb
@@ -321,39 +321,39 @@ commands:
     - run: yum -y install  https://repo.percona.com/yum/percona-release-latest.noarch.rpm
 
 
-  prepare_ubuntu1804_percona57:
+  prepare_bionic_percona57:
     steps:
-    - prepare_ubuntu1804_percona_package
+    - prepare_bionic_percona_package
     - prepare_ubuntu_percona57
 
 
-  prepare_ubuntu1804_percona80:
+  prepare_bionic_percona80:
     steps:
-    - prepare_ubuntu1804_percona_package
+    - prepare_bionic_percona_package
     - prepare_ubuntu_percona80
 
 
-  prepare_ubuntu2004_percona57:
+  prepare_focal_percona57:
     steps:
-    - prepare_ubuntu2004_percona_package
+    - prepare_focal_percona_package
     - prepare_ubuntu_percona57
 
 
-  prepare_ubuntu2004_percona80:
+  prepare_focal_percona80:
     steps:
-    - prepare_ubuntu2004_percona_package
+    - prepare_focal_percona_package
     - prepare_ubuntu_percona80
 
 
-  prepare_ubuntu2204_percona57:
+  prepare_jammy_percona57:
     steps:
-    - prepare_ubuntu2204_percona_package
+    - prepare_jammy_percona_package
     - prepare_ubuntu_percona57
 
 
-  prepare_ubuntu2204_percona80:
+  prepare_jammy_percona80:
     steps:
-    - prepare_ubuntu2204_percona_package
+    - prepare_jammy_percona_package
     - prepare_ubuntu_percona80
 
 
@@ -414,6 +414,7 @@ commands:
     - compile:
         CMAKED: "-DWITH_ZSTD=ON <<parameters.CMAKED>>"
 
+
   compile_and_test_mydumper:
     parameters:
       zstd_on:
@@ -437,19 +438,26 @@ commands:
              steps:
              - run: bash ./test_mydumper.sh SSL ZSTD
 
+  set_env_vars:
+    steps:
+    - run:
+        command: |
+          echo 'export MYDUMPER_VERSION=$(  echo "${CIRCLE_TAG:1}" | cut -d'-' -f1 ) ' >> "$BASH_ENV"
+          echo 'export MYDUMPER_REVISION=$( echo "${CIRCLE_TAG:1}" | cut -d'-' -f2 ) ' >> "$BASH_ENV"
+          source "$BASH_ENV"
 jobs:
 
 
-  compile_and_test_mydumper_in_ubuntu1804_percona57:
+  compile_and_test_mydumper_in_bionic_percona57:
     parameters:
       test:
         type: boolean
-        default: true
-    executor: ubuntu1804_percona57
+        default: false
+    executor: bionic_percona57
     steps:
     - checkout
     - prepare_ubuntu
-    - prepare_ubuntu1804_percona57
+    - prepare_bionic_percona57
     - compile_and_test_mydumper:
         zstd_on: false
         test: << parameters.test >>
@@ -459,16 +467,16 @@ jobs:
            - .
 
 
-  compile_and_test_mydumper_in_ubuntu1804_percona80:
+  compile_and_test_mydumper_in_bionic_percona80:
     parameters:
       test:
         type: boolean
-        default: true
-    executor: ubuntu1804_percona80
+        default: false
+    executor: bionic_percona80
     steps:
     - checkout
     - prepare_ubuntu
-    - prepare_ubuntu1804_percona80
+    - prepare_bionic_percona80
     - compile_and_test_mydumper:
         zstd_on: false
         test: << parameters.test >>
@@ -478,16 +486,16 @@ jobs:
            - .
 
 
-  compile_and_test_mydumper_in_ubuntu2004_percona57:
+  compile_and_test_mydumper_in_focal_percona57:
     parameters:
       test:
         type: boolean
-        default: true
-    executor: ubuntu2004_percona57
+        default: false
+    executor: focal_percona57
     steps:
     - checkout
     - prepare_ubuntu
-    - prepare_ubuntu2004_percona57
+    - prepare_focal_percona57
     - compile_and_test_mydumper:
         zstd_on: true
         test: << parameters.test >>
@@ -497,16 +505,16 @@ jobs:
            - .
 
 
-  compile_and_test_mydumper_in_ubuntu2004_percona80:
+  compile_and_test_mydumper_in_focal_percona80:
     parameters:
       test:
         type: boolean
-        default: true
-    executor: ubuntu2004_percona80
+        default: false
+    executor: focal_percona80
     steps:
     - checkout
     - prepare_ubuntu
-    - prepare_ubuntu2004_percona80
+    - prepare_focal_percona80
     - compile_and_test_mydumper:
         zstd_on: true
         test: << parameters.test >>
@@ -516,16 +524,16 @@ jobs:
            - .
 
 
-  compile_and_test_mydumper_in_ubuntu2204_percona57:
+  compile_and_test_mydumper_in_jammy_percona57:
     parameters:
       test:
         type: boolean
-        default: true
-    executor: ubuntu2204_percona57
+        default: false
+    executor: jammy_percona57
     steps:
     - checkout
     - prepare_ubuntu
-    - prepare_ubuntu2204_percona57
+    - prepare_jammy_percona57
     - compile_and_test_mydumper:
         zstd_on: true
         test: << parameters.test >>
@@ -535,16 +543,16 @@ jobs:
            - .
 
 
-  compile_and_test_mydumper_in_ubuntu2204_percona80:
+  compile_and_test_mydumper_in_jammy_percona80:
     parameters:
       test:
         type: boolean
-        default: true
-    executor: ubuntu2204_percona80
+        default: false
+    executor: jammy_percona80
     steps:
     - checkout
     - prepare_ubuntu
-    - prepare_ubuntu2204_percona80
+    - prepare_jammy_percona80
     - compile_and_test_mydumper:
         zstd_on: true
         test: << parameters.test >>
@@ -558,7 +566,7 @@ jobs:
     parameters:
       test:
         type: boolean
-        default: true
+        default: false
     executor: buster_percona57
     steps:
     - checkout
@@ -577,7 +585,7 @@ jobs:
     parameters:
       test:
         type: boolean
-        default: true
+        default: false
     executor: buster_percona80
     steps:
     - checkout
@@ -596,7 +604,7 @@ jobs:
     parameters:
       test:
         type: boolean
-        default: true
+        default: false
     executor: bullseye_percona57
     steps:
     - checkout
@@ -615,7 +623,7 @@ jobs:
     parameters:
       test:
         type: boolean
-        default: true
+        default: false
     executor: bullseye_percona80
     steps:
     - checkout
@@ -715,11 +723,9 @@ jobs:
 
   build_el7_percona57:
     executor: el7_percona57
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_el
     - prepare_el_percona57
     - run: mkdir -p /tmp/package
@@ -728,15 +734,15 @@ jobs:
         CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
     - run: mkdir -p /tmp/src/mydumper/el7_percona57_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/el7_percona57_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el7_percona_57_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el7_percona57_gzip
     - when:
         condition: true
         steps:
         - compile_zstd:
             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-        - run: mkdir -p /tmp/src/mydumper/el7_percona_57_zstd
-        - run: cp mydumper myloader /tmp/src/mydumper/el7_percona_57_zstd/
-        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el7_percona_57_zstd
+        - run: mkdir -p /tmp/src/mydumper/el7_percona57_zstd
+        - run: cp mydumper myloader /tmp/src/mydumper/el7_percona57_zstd/
+        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el7_percona57_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -744,11 +750,9 @@ jobs:
            - .
   build_el7_percona80:
     executor: el7_percona80
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_el
     - prepare_el_percona80
     - run: mkdir -p /tmp/package
@@ -757,15 +761,15 @@ jobs:
         CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
     - run: mkdir -p /tmp/src/mydumper/el7_percona80_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/el7_percona80_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el7_percona_80_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el7_percona80_gzip
     - when:
         condition: true
         steps:
         - compile_zstd:
             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-        - run: mkdir -p /tmp/src/mydumper/el7_percona_80_zstd
-        - run: cp mydumper myloader /tmp/src/mydumper/el7_percona_80_zstd/
-        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el7_percona_80_zstd
+        - run: mkdir -p /tmp/src/mydumper/el7_percona80_zstd
+        - run: cp mydumper myloader /tmp/src/mydumper/el7_percona80_zstd/
+        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el7_percona80_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -773,11 +777,9 @@ jobs:
            - .
   build_el8_percona57:
     executor: el8_percona57
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_el
     - prepare_el_percona57
     - run: mkdir -p /tmp/package
@@ -786,15 +788,15 @@ jobs:
         CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
     - run: mkdir -p /tmp/src/mydumper/el8_percona57_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/el8_percona57_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el8_percona_57_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el8_percona57_gzip
     - when:
         condition: true
         steps:
         - compile_zstd:
             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-        - run: mkdir -p /tmp/src/mydumper/el8_percona_57_zstd
-        - run: cp mydumper myloader /tmp/src/mydumper/el8_percona_57_zstd/
-        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el8_percona_57_zstd
+        - run: mkdir -p /tmp/src/mydumper/el8_percona57_zstd
+        - run: cp mydumper myloader /tmp/src/mydumper/el8_percona57_zstd/
+        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el8_percona57_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -802,11 +804,9 @@ jobs:
            - .
   build_el8_percona80:
     executor: el8_percona80
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_el
     - prepare_el_percona80
     - run: mkdir -p /tmp/package
@@ -815,15 +815,15 @@ jobs:
         CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
     - run: mkdir -p /tmp/src/mydumper/el8_percona80_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/el8_percona80_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el8_percona_80_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el8_percona80_gzip
     - when:
         condition: true
         steps:
         - compile_zstd:
             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-        - run: mkdir -p /tmp/src/mydumper/el8_percona_80_zstd
-        - run: cp mydumper myloader /tmp/src/mydumper/el8_percona_80_zstd/
-        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el8_percona_80_zstd
+        - run: mkdir -p /tmp/src/mydumper/el8_percona80_zstd
+        - run: cp mydumper myloader /tmp/src/mydumper/el8_percona80_zstd/
+        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el8_percona80_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -831,11 +831,9 @@ jobs:
            - .
   build_el9_percona57:
     executor: el9_percona57
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_el
     - prepare_el_percona57
     - run: mkdir -p /tmp/package
@@ -844,15 +842,15 @@ jobs:
         CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
     - run: mkdir -p /tmp/src/mydumper/el9_percona57_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/el9_percona57_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el9_percona_57_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el9_percona57_gzip
     - when:
         condition: true
         steps:
         - compile_zstd:
             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-        - run: mkdir -p /tmp/src/mydumper/el9_percona_57_zstd
-        - run: cp mydumper myloader /tmp/src/mydumper/el9_percona_57_zstd/
-        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el9_percona_57_zstd
+        - run: mkdir -p /tmp/src/mydumper/el9_percona57_zstd
+        - run: cp mydumper myloader /tmp/src/mydumper/el9_percona57_zstd/
+        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el9_percona57_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -860,11 +858,9 @@ jobs:
            - .
   build_el9_percona80:
     executor: el9_percona80
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_el
     - prepare_el_percona80
     - run: mkdir -p /tmp/package
@@ -873,183 +869,177 @@ jobs:
         CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
     - run: mkdir -p /tmp/src/mydumper/el9_percona80_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/el9_percona80_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el9_percona_80_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el9_percona80_gzip
     - when:
         condition: true
         steps:
         - compile_zstd:
             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-        - run: mkdir -p /tmp/src/mydumper/el9_percona_80_zstd
-        - run: cp mydumper myloader /tmp/src/mydumper/el9_percona_80_zstd/
-        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el9_percona_80_zstd
+        - run: mkdir -p /tmp/src/mydumper/el9_percona80_zstd
+        - run: cp mydumper myloader /tmp/src/mydumper/el9_percona80_zstd/
+        - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm el9_percona80_zstd
 
     - persist_to_workspace:
          root: /tmp/package
          paths:
            - .
-  build_ubuntu1804_percona57:
-    executor: ubuntu1804_percona57
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
+  build_bionic_percona57:
+    executor: bionic_percona57
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
-    - prepare_ubuntu1804_percona57
+    - prepare_bionic_percona57
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-    - run: mkdir -p /tmp/src/mydumper/ubuntu1804_percona57_gzip
-    - run: cp mydumper myloader /tmp/src/mydumper/ubuntu1804_percona57_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu1804_percona_57_gzip
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+    - run: mkdir -p /tmp/src/mydumper/bionic_percona57_gzip
+    - run: cp mydumper myloader /tmp/src/mydumper/bionic_percona57_gzip/
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb bionic_percona57_gzip
     - when:
         condition: false
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/ubuntu1804_percona_57_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/ubuntu1804_percona_57_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu1804_percona_57_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/bionic_percona57_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/bionic_percona57_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb bionic_percona57_zstd
 
     - persist_to_workspace:
          root: /tmp/package
          paths:
            - .
-  build_ubuntu1804_percona80:
-    executor: ubuntu1804_percona80
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
+  build_bionic_percona80:
+    executor: bionic_percona80
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
-    - prepare_ubuntu1804_percona80
+    - prepare_bionic_percona80
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-    - run: mkdir -p /tmp/src/mydumper/ubuntu1804_percona80_gzip
-    - run: cp mydumper myloader /tmp/src/mydumper/ubuntu1804_percona80_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu1804_percona_80_gzip
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+    - run: mkdir -p /tmp/src/mydumper/bionic_percona80_gzip
+    - run: cp mydumper myloader /tmp/src/mydumper/bionic_percona80_gzip/
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb bionic_percona80_gzip
     - when:
         condition: false
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/ubuntu1804_percona_80_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/ubuntu1804_percona_80_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu1804_percona_80_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/bionic_percona80_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/bionic_percona80_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb bionic_percona80_zstd
 
     - persist_to_workspace:
          root: /tmp/package
          paths:
            - .
-  build_ubuntu2004_percona57:
-    executor: ubuntu2004_percona57
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
+  build_focal_percona57:
+    executor: focal_percona57
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
-    - prepare_ubuntu2004_percona57
+    - prepare_focal_percona57
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-    - run: mkdir -p /tmp/src/mydumper/ubuntu2004_percona57_gzip
-    - run: cp mydumper myloader /tmp/src/mydumper/ubuntu2004_percona57_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu2004_percona_57_gzip
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+    - run: mkdir -p /tmp/src/mydumper/focal_percona57_gzip
+    - run: cp mydumper myloader /tmp/src/mydumper/focal_percona57_gzip/
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb focal_percona57_gzip
     - when:
         condition: true
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/ubuntu2004_percona_57_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/ubuntu2004_percona_57_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu2004_percona_57_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/focal_percona57_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/focal_percona57_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb focal_percona57_zstd
 
     - persist_to_workspace:
          root: /tmp/package
          paths:
            - .
-  build_ubuntu2004_percona80:
-    executor: ubuntu2004_percona80
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
+  build_focal_percona80:
+    executor: focal_percona80
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
-    - prepare_ubuntu2004_percona80
+    - prepare_focal_percona80
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-    - run: mkdir -p /tmp/src/mydumper/ubuntu2004_percona80_gzip
-    - run: cp mydumper myloader /tmp/src/mydumper/ubuntu2004_percona80_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu2004_percona_80_gzip
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+    - run: mkdir -p /tmp/src/mydumper/focal_percona80_gzip
+    - run: cp mydumper myloader /tmp/src/mydumper/focal_percona80_gzip/
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb focal_percona80_gzip
     - when:
         condition: true
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/ubuntu2004_percona_80_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/ubuntu2004_percona_80_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu2004_percona_80_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/focal_percona80_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/focal_percona80_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb focal_percona80_zstd
 
     - persist_to_workspace:
          root: /tmp/package
          paths:
            - .
-  build_ubuntu2204_percona57:
-    executor: ubuntu2204_percona57
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
+  build_jammy_percona57:
+    executor: jammy_percona57
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
-    - prepare_ubuntu2204_percona57
+    - prepare_jammy_percona57
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-    - run: mkdir -p /tmp/src/mydumper/ubuntu2204_percona57_gzip
-    - run: cp mydumper myloader /tmp/src/mydumper/ubuntu2204_percona57_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu2204_percona_57_gzip
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+    - run: mkdir -p /tmp/src/mydumper/jammy_percona57_gzip
+    - run: cp mydumper myloader /tmp/src/mydumper/jammy_percona57_gzip/
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb jammy_percona57_gzip
     - when:
         condition: true
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/ubuntu2204_percona_57_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/ubuntu2204_percona_57_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu2204_percona_57_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/jammy_percona57_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/jammy_percona57_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb jammy_percona57_zstd
 
     - persist_to_workspace:
          root: /tmp/package
          paths:
            - .
-  build_ubuntu2204_percona80:
-    executor: ubuntu2204_percona80
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
+  build_jammy_percona80:
+    executor: jammy_percona80
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
-    - prepare_ubuntu2204_percona80
+    - prepare_jammy_percona80
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-    - run: mkdir -p /tmp/src/mydumper/ubuntu2204_percona80_gzip
-    - run: cp mydumper myloader /tmp/src/mydumper/ubuntu2204_percona80_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu2204_percona_80_gzip
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+    - run: mkdir -p /tmp/src/mydumper/jammy_percona80_gzip
+    - run: cp mydumper myloader /tmp/src/mydumper/jammy_percona80_gzip/
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb jammy_percona80_gzip
     - when:
         condition: true
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/ubuntu2204_percona_80_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/ubuntu2204_percona_80_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm ubuntu2204_percona_80_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/jammy_percona80_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/jammy_percona80_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb jammy_percona80_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -1057,27 +1047,26 @@ jobs:
            - .
   build_buster_percona57:
     executor: buster_percona57
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
     - prepare_buster_percona57
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
     - run: mkdir -p /tmp/src/mydumper/buster_percona57_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/buster_percona57_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm buster_percona_57_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb buster_percona57_gzip
     - when:
         condition: false
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/buster_percona_57_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/buster_percona_57_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm buster_percona_57_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/buster_percona57_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/buster_percona57_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb buster_percona57_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -1085,27 +1074,26 @@ jobs:
            - .
   build_buster_percona80:
     executor: buster_percona80
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
     - prepare_buster_percona80
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
     - run: mkdir -p /tmp/src/mydumper/buster_percona80_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/buster_percona80_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm buster_percona_80_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb buster_percona80_gzip
     - when:
         condition: false
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/buster_percona_80_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/buster_percona_80_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm buster_percona_80_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/buster_percona80_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/buster_percona80_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb buster_percona80_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -1113,27 +1101,26 @@ jobs:
            - .
   build_bullseye_percona57:
     executor: bullseye_percona57
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
     - prepare_bullseye_percona57
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
     - run: mkdir -p /tmp/src/mydumper/bullseye_percona57_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/bullseye_percona57_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm bullseye_percona_57_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb bullseye_percona57_gzip
     - when:
         condition: true
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/bullseye_percona_57_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/bullseye_percona_57_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm bullseye_percona_57_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/bullseye_percona57_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/bullseye_percona57_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb bullseye_percona57_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -1141,27 +1128,26 @@ jobs:
            - .
   build_bullseye_percona80:
     executor: bullseye_percona80
-    environment:
-      MYDUMPER_VERSION: 0.13.3
-      MYDUMPER_REVISION: 1
     steps:
     - checkout
+    - set_env_vars
     - prepare_ubuntu
     - prepare_bullseye_percona80
+    - run: sudo apt install -y fakeroot
     - run: mkdir -p /tmp/package
     - compile:
-        CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
+        CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
     - run: mkdir -p /tmp/src/mydumper/bullseye_percona80_gzip
     - run: cp mydumper myloader /tmp/src/mydumper/bullseye_percona80_gzip/
-    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm bullseye_percona_80_gzip
+    - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb bullseye_percona80_gzip
     - when:
         condition: true
         steps:
           - compile_zstd:
-             CMAKED: "-DMYSQL_LIBRARIES_mysqlclient:FILEPATH=/usr/lib64/mysql/libmysqlclient.a"
-          - run: mkdir -p /tmp/src/mydumper/bullseye_percona_80_zstd
-          - run: cp mydumper myloader /tmp/src/mydumper/bullseye_percona_80_zstd/
-          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} rpm bullseye_percona_80_zstd
+             CMAKED: "-DMYSQL_LIBRARIES_perconaserverclient:FILEPATH=/usr/lib/x86_64-linux-gnu/libperconaserverclient.a"
+          - run: mkdir -p /tmp/src/mydumper/bullseye_percona80_zstd
+          - run: cp mydumper myloader /tmp/src/mydumper/bullseye_percona80_zstd/
+          - run: ./package/build.sh ${MYDUMPER_VERSION} ${MYDUMPER_REVISION} deb bullseye_percona80_zstd
 
     - persist_to_workspace:
          root: /tmp/package
@@ -1173,17 +1159,17 @@ jobs:
     steps:
     - attach_workspace:
         at: /tmp/package
-    - run: ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -prerelease -draft -delete TEST /tmp/package
+    - run: ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -prerelease -draft -delete ${CIRCLE_TAG} /tmp/package
 
 workflows:
   version: 2
   mydumper:
     jobs:
-    - compile_and_test_mydumper_in_ubuntu1804_percona57
-    - compile_and_test_mydumper_in_ubuntu1804_percona80
-    - compile_and_test_mydumper_in_ubuntu2004_percona57
-    - compile_and_test_mydumper_in_ubuntu2004_percona80
-    - compile_and_test_mydumper_in_ubuntu2204_percona80
+    - compile_and_test_mydumper_in_bionic_percona57
+    - compile_and_test_mydumper_in_bionic_percona80
+    - compile_and_test_mydumper_in_focal_percona57
+    - compile_and_test_mydumper_in_focal_percona80
+    - compile_and_test_mydumper_in_jammy_percona80
     - compile_and_test_mydumper_in_el7_percona57
     - compile_and_test_mydumper_in_el7_percona80
     - compile_and_test_mydumper_in_el8_percona57
@@ -1193,59 +1179,65 @@ workflows:
     - compile_and_test_mydumper_in_buster_percona80
     - compile_and_test_mydumper_in_bullseye_percona57
     - compile_and_test_mydumper_in_bullseye_percona80
-    - build_ubuntu1804_percona57:
+    - compile_and_test_mydumper_in_focal_percona57:
+        test: true
+
+    - compile_and_test_mydumper_in_focal_percona80:
+        test: true
+
+    - build_bionic_percona57:
         filters:
           branches:
             ignore: /.*/
           tags:
-            only: /^\d+\.\d+\.\d+-\d+$/
-    - build_ubuntu2004_percona57:
+            only: /^v\d+\.\d+\.\d+-\d+$/
+    - build_focal_percona57:
         filters:
           branches:
             ignore: /.*/
           tags:
-            only: /^\d+\.\d+\.\d+-\d+$/
-    - build_ubuntu2204_percona80:
+            only: /^v\d+\.\d+\.\d+-\d+$/
+    - build_jammy_percona80:
         filters:
           branches:
             ignore: /.*/
           tags:
-            only: /^\d+\.\d+\.\d+-\d+$/
+            only: /^v\d+\.\d+\.\d+-\d+$/
     - build_el7_percona57:
         filters:
           branches:
             ignore: /.*/
           tags:
-            only: /^\d+\.\d+\.\d+-\d+$/
+            only: /^v\d+\.\d+\.\d+-\d+$/
     - build_el8_percona57:
         filters:
           branches:
             ignore: /.*/
           tags:
-            only: /^\d+\.\d+\.\d+-\d+$/
+            only: /^v\d+\.\d+\.\d+-\d+$/
     - build_el9_percona80:
         filters:
           branches:
             ignore: /.*/
           tags:
-            only: /^\d+\.\d+\.\d+-\d+$/
+            only: /^v\d+\.\d+\.\d+-\d+$/
     - build_bullseye_percona80:
         filters:
           branches:
             ignore: /.*/
           tags:
-            only: /^\d+\.\d+\.\d+-\d+$/
+            only: /^v\d+\.\d+\.\d+-\d+$/
     - build_buster_percona57:
         filters:
           branches:
             ignore: /.*/
           tags:
-            only: /^\d+\.\d+\.\d+-\d+$/
+            only: /^v\d+\.\d+\.\d+-\d+$/
     - publish-github-release:
         requires:
-          - build_ubuntu1804_percona57
-          - build_ubuntu2004_percona57
-          - build_ubuntu2204_percona80
+          - build_bionic_percona57
+          - build_focal_percona57
+          - build_jammy_percona80
           - build_el7_percona57
           - build_el8_percona57
           - build_el9_percona80
@@ -1256,4 +1248,4 @@ workflows:
             ignore: /.*/
           tags:
 #            only: /.*/
-            only: /^\d+\.\d+\.\d+-\d+$/
+            only: /^v\d+\.\d+\.\d+-\d+$/
