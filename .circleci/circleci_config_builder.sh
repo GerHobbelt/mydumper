@@ -151,6 +151,27 @@ do
         MYSQL_ALLOW_EMPTY_PASSWORD: true
     working_directory: /tmp/src/mydumper"
 done
+
+    for vendor in ${list_mysql_version[@]}
+    do
+        echo "
+  ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}:
+    docker:
+    - image: mydumper/mydumper-builder-${all_os[${os}_0]}
+      environment:
+        MYSQL_HOST: 127.0.0.1
+        MYSQL_DB: mate
+        MYSQL_ALLOW_EMPTY_PASSWORD: true
+    - image: ${all_vendors[${vendor}_1]}
+      command: mysqld
+      environment:
+        MYSQL_USER: root
+        MYSQL_ALLOW_EMPTY_PASSWORD: true
+    working_directory: /tmp/src/mydumper"
+done
+
+
+
                 echo "
   ${all_os[${os}_0]}:
     docker:
@@ -351,7 +372,7 @@ done
 
 for os in ${list_el_os[@]}
 do
-        for vendor in ${list_all_vendors[@]} tidb
+        for vendor in ${list_all_vendors[@]} tidb ${list_mysql_version[@]}
         do
 echo "
   compile_and_test_mydumper_in_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}:
@@ -381,7 +402,7 @@ for arch in ${list_arch[@]}
 do
 for os in ${list_el_os[@]}
 do
-        for vendor in ${list_all_vendors[@]} ${list_mysql_versions[@]}
+        for vendor in ${list_all_vendors[@]} ${list_mysql_version[@]}
         do
 echo "  build_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_rpm]}:
     executor: ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}
@@ -462,7 +483,7 @@ done
 
 for os in ${list_el_os[@]}
 do
-        for vendor in ${list_mysql_versions[@]}
+        for vendor in ${list_mysql_version[@]}
         do
 echo "    - compile_and_test_mydumper_in_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}" | egrep -v "${filter_out}"
 done
