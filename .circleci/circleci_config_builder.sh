@@ -128,7 +128,7 @@ list_build=("bionic_percona80_amd64" "focal_percona80_amd64" "jammy_percona80_am
 
 #list_build=("bionic_percona80_amd64" "focal_percona80_amd64" "jammy_percona80_amd64" "el7_percona57_x86_64" "el8_percona57_x86_64" "el9_percona80_x86_64" "bullseye_percona80_amd64" "buster_percona80_amd64")
 
-filter_out="jammy|el9_percona57"
+filter_out="jammy|el9_percona57|el7_mysql80_aarch64"
 
 for os in ${list_all_os[@]}
 do
@@ -202,6 +202,9 @@ echo "
     steps:
     - run: sudo yum install -y mysql-community-libs mysql-community-devel mysql-community-client
 
+  prepare_el8_mysql80:
+    steps:
+    - run: sudo yum install -y mysql-libs mysql-devel mysql
 
   prepare_ubuntu_percona57:
     steps:
@@ -237,7 +240,7 @@ echo "
     - run: sudo yum install -y MariaDB-compat || true
     "
 
-for os in ${list_el_os[@]}
+for os in el7 el9
 do
     for vendor in ${list_mysql_version[@]}
         do
@@ -398,6 +401,7 @@ echo "
 "
 done
 done
+
 for arch in ${list_arch[@]}
 do
 for os in ${list_el_os[@]}
@@ -405,7 +409,8 @@ do
         for vendor in ${list_all_vendors[@]} ${list_mysql_version[@]}
         do
 echo "  build_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_rpm]}:
-    executor: ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}
+#    executor: ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}
+    executor: ${all_os[${os}_0]}
     resource_class: ${all_arch[${arch}_resource_class]}
     steps:
     - checkout
@@ -436,7 +441,8 @@ do
         for vendor in ${list_all_vendors[@]}
         do
 echo "  build_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_deb]}:
-    executor: ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}
+#    executor: ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}
+    executor: ${all_os[${os}_0]}
     resource_class: ${all_arch[${arch}_resource_class]}
     steps:
     - checkout

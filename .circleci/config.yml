@@ -861,6 +861,9 @@ commands:
     steps:
     - run: sudo yum install -y mysql-community-libs mysql-community-devel mysql-community-client
 
+  prepare_el8_mysql80:
+    steps:
+    - run: sudo yum install -y mysql-libs mysql-devel mysql
 
   prepare_ubuntu_percona57:
     steps:
@@ -897,11 +900,6 @@ commands:
     
 
   prepare_el7_mysql80:
-    steps:
-    - prepare_el_mysql80
-
-
-  prepare_el8_mysql80:
     steps:
     - prepare_el_mysql80
 
@@ -2050,7 +2048,8 @@ jobs:
            - .
 
   build_el7_percona57_aarch64:
-    executor: el7_percona57
+#    executor: el7_percona57
+    executor: el7
     resource_class: arm.medium
     steps:
     - checkout
@@ -2071,7 +2070,8 @@ jobs:
          paths:
            - .
   build_el7_percona80_aarch64:
-    executor: el7_percona80
+#    executor: el7_percona80
+    executor: el7
     resource_class: arm.medium
     steps:
     - checkout
@@ -2092,7 +2092,8 @@ jobs:
          paths:
            - .
   build_el7_mariadb1011_aarch64:
-    executor: el7_mariadb1011
+#    executor: el7_mariadb1011
+    executor: el7
     resource_class: arm.medium
     steps:
     - checkout
@@ -2113,7 +2114,8 @@ jobs:
          paths:
            - .
   build_el7_mariadb1006_aarch64:
-    executor: el7_mariadb1006
+#    executor: el7_mariadb1006
+    executor: el7
     resource_class: arm.medium
     steps:
     - checkout
@@ -2134,7 +2136,8 @@ jobs:
          paths:
            - .
   build_el7_mysql80_aarch64:
-    executor: el7_mysql80
+#    executor: el7_mysql80
+    executor: el7
     resource_class: arm.medium
     steps:
     - checkout
@@ -2155,7 +2158,8 @@ jobs:
          paths:
            - .
   build_el8_percona57_aarch64:
-    executor: el8_percona57
+#    executor: el8_percona57
+    executor: el8
     resource_class: arm.medium
     steps:
     - checkout
@@ -2176,7 +2180,8 @@ jobs:
          paths:
            - .
   build_el8_percona80_aarch64:
-    executor: el8_percona80
+#    executor: el8_percona80
+    executor: el8
     resource_class: arm.medium
     steps:
     - checkout
@@ -2197,7 +2202,8 @@ jobs:
          paths:
            - .
   build_el8_mariadb1011_aarch64:
-    executor: el8_mariadb1011
+#    executor: el8_mariadb1011
+    executor: el8
     resource_class: arm.medium
     steps:
     - checkout
@@ -2218,7 +2224,8 @@ jobs:
          paths:
            - .
   build_el8_mariadb1006_aarch64:
-    executor: el8_mariadb1006
+#    executor: el8_mariadb1006
+    executor: el8
     resource_class: arm.medium
     steps:
     - checkout
@@ -2239,7 +2246,8 @@ jobs:
          paths:
            - .
   build_el8_mysql80_aarch64:
-    executor: el8_mysql80
+#    executor: el8_mysql80
+    executor: el8
     resource_class: arm.medium
     steps:
     - checkout
@@ -2260,7 +2268,8 @@ jobs:
          paths:
            - .
   build_el9_percona57_aarch64:
-    executor: el9_percona57
+#    executor: el9_percona57
+    executor: el9
     resource_class: arm.medium
     steps:
     - checkout
@@ -2281,7 +2290,8 @@ jobs:
          paths:
            - .
   build_el9_percona80_aarch64:
-    executor: el9_percona80
+#    executor: el9_percona80
+    executor: el9
     resource_class: arm.medium
     steps:
     - checkout
@@ -2302,7 +2312,8 @@ jobs:
          paths:
            - .
   build_el9_mariadb1011_aarch64:
-    executor: el9_mariadb1011
+#    executor: el9_mariadb1011
+    executor: el9
     resource_class: arm.medium
     steps:
     - checkout
@@ -2323,7 +2334,8 @@ jobs:
          paths:
            - .
   build_el9_mariadb1006_aarch64:
-    executor: el9_mariadb1006
+#    executor: el9_mariadb1006
+    executor: el9
     resource_class: arm.medium
     steps:
     - checkout
@@ -2344,7 +2356,8 @@ jobs:
          paths:
            - .
   build_el9_mysql80_aarch64:
-    executor: el9_mysql80
+#    executor: el9_mysql80
+    executor: el9
     resource_class: arm.medium
     steps:
     - checkout
@@ -2365,7 +2378,8 @@ jobs:
          paths:
            - .
   build_el7_percona57_x86_64:
-    executor: el7_percona57
+#    executor: el7_percona57
+    executor: el7
     resource_class: large
     steps:
     - checkout
@@ -2386,7 +2400,8 @@ jobs:
          paths:
            - .
   build_el7_percona80_x86_64:
-    executor: el7_percona80
+#    executor: el7_percona80
+    executor: el7
     resource_class: large
     steps:
     - checkout
@@ -2407,7 +2422,8 @@ jobs:
          paths:
            - .
   build_el7_mariadb1011_x86_64:
-    executor: el7_mariadb1011
+#    executor: el7_mariadb1011
+    executor: el7
     resource_class: large
     steps:
     - checkout
@@ -2428,7 +2444,8 @@ jobs:
          paths:
            - .
   build_el7_mariadb1006_x86_64:
-    executor: el7_mariadb1006
+#    executor: el7_mariadb1006
+    executor: el7
     resource_class: large
     steps:
     - checkout
@@ -2449,7 +2466,8 @@ jobs:
          paths:
            - .
   build_el7_mysql80_x86_64:
-    executor: el7_mysql80
+#    executor: el7_mysql80
+    executor: el7
     resource_class: large
     steps:
     - checkout
@@ -2470,7 +2488,8 @@ jobs:
          paths:
            - .
   build_el8_percona57_x86_64:
-    executor: el8_percona57
+#    executor: el8_percona57
+    executor: el8
     resource_class: large
     steps:
     - checkout
@@ -2491,7 +2510,8 @@ jobs:
          paths:
            - .
   build_el8_percona80_x86_64:
-    executor: el8_percona80
+#    executor: el8_percona80
+    executor: el8
     resource_class: large
     steps:
     - checkout
@@ -2512,7 +2532,8 @@ jobs:
          paths:
            - .
   build_el8_mariadb1011_x86_64:
-    executor: el8_mariadb1011
+#    executor: el8_mariadb1011
+    executor: el8
     resource_class: large
     steps:
     - checkout
@@ -2533,7 +2554,8 @@ jobs:
          paths:
            - .
   build_el8_mariadb1006_x86_64:
-    executor: el8_mariadb1006
+#    executor: el8_mariadb1006
+    executor: el8
     resource_class: large
     steps:
     - checkout
@@ -2554,7 +2576,8 @@ jobs:
          paths:
            - .
   build_el8_mysql80_x86_64:
-    executor: el8_mysql80
+#    executor: el8_mysql80
+    executor: el8
     resource_class: large
     steps:
     - checkout
@@ -2575,7 +2598,8 @@ jobs:
          paths:
            - .
   build_el9_percona57_x86_64:
-    executor: el9_percona57
+#    executor: el9_percona57
+    executor: el9
     resource_class: large
     steps:
     - checkout
@@ -2596,7 +2620,8 @@ jobs:
          paths:
            - .
   build_el9_percona80_x86_64:
-    executor: el9_percona80
+#    executor: el9_percona80
+    executor: el9
     resource_class: large
     steps:
     - checkout
@@ -2617,7 +2642,8 @@ jobs:
          paths:
            - .
   build_el9_mariadb1011_x86_64:
-    executor: el9_mariadb1011
+#    executor: el9_mariadb1011
+    executor: el9
     resource_class: large
     steps:
     - checkout
@@ -2638,7 +2664,8 @@ jobs:
          paths:
            - .
   build_el9_mariadb1006_x86_64:
-    executor: el9_mariadb1006
+#    executor: el9_mariadb1006
+    executor: el9
     resource_class: large
     steps:
     - checkout
@@ -2659,7 +2686,8 @@ jobs:
          paths:
            - .
   build_el9_mysql80_x86_64:
-    executor: el9_mysql80
+#    executor: el9_mysql80
+    executor: el9
     resource_class: large
     steps:
     - checkout
@@ -2680,7 +2708,8 @@ jobs:
          paths:
            - .
   build_bionic_percona57_arm64:
-    executor: bionic_percona57
+#    executor: bionic_percona57
+    executor: bionic
     resource_class: arm.medium
     steps:
     - checkout
@@ -2701,7 +2730,8 @@ jobs:
          paths:
            - .
   build_bionic_percona80_arm64:
-    executor: bionic_percona80
+#    executor: bionic_percona80
+    executor: bionic
     resource_class: arm.medium
     steps:
     - checkout
@@ -2722,7 +2752,8 @@ jobs:
          paths:
            - .
   build_bionic_mariadb1011_arm64:
-    executor: bionic_mariadb1011
+#    executor: bionic_mariadb1011
+    executor: bionic
     resource_class: arm.medium
     steps:
     - checkout
@@ -2743,7 +2774,8 @@ jobs:
          paths:
            - .
   build_bionic_mariadb1006_arm64:
-    executor: bionic_mariadb1006
+#    executor: bionic_mariadb1006
+    executor: bionic
     resource_class: arm.medium
     steps:
     - checkout
@@ -2764,7 +2796,8 @@ jobs:
          paths:
            - .
   build_focal_percona57_arm64:
-    executor: focal_percona57
+#    executor: focal_percona57
+    executor: focal
     resource_class: arm.medium
     steps:
     - checkout
@@ -2785,7 +2818,8 @@ jobs:
          paths:
            - .
   build_focal_percona80_arm64:
-    executor: focal_percona80
+#    executor: focal_percona80
+    executor: focal
     resource_class: arm.medium
     steps:
     - checkout
@@ -2806,7 +2840,8 @@ jobs:
          paths:
            - .
   build_focal_mariadb1011_arm64:
-    executor: focal_mariadb1011
+#    executor: focal_mariadb1011
+    executor: focal
     resource_class: arm.medium
     steps:
     - checkout
@@ -2827,7 +2862,8 @@ jobs:
          paths:
            - .
   build_focal_mariadb1006_arm64:
-    executor: focal_mariadb1006
+#    executor: focal_mariadb1006
+    executor: focal
     resource_class: arm.medium
     steps:
     - checkout
@@ -2848,7 +2884,8 @@ jobs:
          paths:
            - .
   build_jammy_percona57_arm64:
-    executor: jammy_percona57
+#    executor: jammy_percona57
+    executor: jammy
     resource_class: arm.medium
     steps:
     - checkout
@@ -2869,7 +2906,8 @@ jobs:
          paths:
            - .
   build_jammy_percona80_arm64:
-    executor: jammy_percona80
+#    executor: jammy_percona80
+    executor: jammy
     resource_class: arm.medium
     steps:
     - checkout
@@ -2890,7 +2928,8 @@ jobs:
          paths:
            - .
   build_jammy_mariadb1011_arm64:
-    executor: jammy_mariadb1011
+#    executor: jammy_mariadb1011
+    executor: jammy
     resource_class: arm.medium
     steps:
     - checkout
@@ -2911,7 +2950,8 @@ jobs:
          paths:
            - .
   build_jammy_mariadb1006_arm64:
-    executor: jammy_mariadb1006
+#    executor: jammy_mariadb1006
+    executor: jammy
     resource_class: arm.medium
     steps:
     - checkout
@@ -2932,7 +2972,8 @@ jobs:
          paths:
            - .
   build_buster_percona57_arm64:
-    executor: buster_percona57
+#    executor: buster_percona57
+    executor: buster
     resource_class: arm.medium
     steps:
     - checkout
@@ -2953,7 +2994,8 @@ jobs:
          paths:
            - .
   build_buster_percona80_arm64:
-    executor: buster_percona80
+#    executor: buster_percona80
+    executor: buster
     resource_class: arm.medium
     steps:
     - checkout
@@ -2974,7 +3016,8 @@ jobs:
          paths:
            - .
   build_buster_mariadb1011_arm64:
-    executor: buster_mariadb1011
+#    executor: buster_mariadb1011
+    executor: buster
     resource_class: arm.medium
     steps:
     - checkout
@@ -2995,7 +3038,8 @@ jobs:
          paths:
            - .
   build_buster_mariadb1006_arm64:
-    executor: buster_mariadb1006
+#    executor: buster_mariadb1006
+    executor: buster
     resource_class: arm.medium
     steps:
     - checkout
@@ -3016,7 +3060,8 @@ jobs:
          paths:
            - .
   build_bullseye_percona57_arm64:
-    executor: bullseye_percona57
+#    executor: bullseye_percona57
+    executor: bullseye
     resource_class: arm.medium
     steps:
     - checkout
@@ -3037,7 +3082,8 @@ jobs:
          paths:
            - .
   build_bullseye_percona80_arm64:
-    executor: bullseye_percona80
+#    executor: bullseye_percona80
+    executor: bullseye
     resource_class: arm.medium
     steps:
     - checkout
@@ -3058,7 +3104,8 @@ jobs:
          paths:
            - .
   build_bullseye_mariadb1011_arm64:
-    executor: bullseye_mariadb1011
+#    executor: bullseye_mariadb1011
+    executor: bullseye
     resource_class: arm.medium
     steps:
     - checkout
@@ -3079,7 +3126,8 @@ jobs:
          paths:
            - .
   build_bullseye_mariadb1006_arm64:
-    executor: bullseye_mariadb1006
+#    executor: bullseye_mariadb1006
+    executor: bullseye
     resource_class: arm.medium
     steps:
     - checkout
@@ -3100,7 +3148,8 @@ jobs:
          paths:
            - .
   build_bionic_percona57_amd64:
-    executor: bionic_percona57
+#    executor: bionic_percona57
+    executor: bionic
     resource_class: large
     steps:
     - checkout
@@ -3121,7 +3170,8 @@ jobs:
          paths:
            - .
   build_bionic_percona80_amd64:
-    executor: bionic_percona80
+#    executor: bionic_percona80
+    executor: bionic
     resource_class: large
     steps:
     - checkout
@@ -3142,7 +3192,8 @@ jobs:
          paths:
            - .
   build_bionic_mariadb1011_amd64:
-    executor: bionic_mariadb1011
+#    executor: bionic_mariadb1011
+    executor: bionic
     resource_class: large
     steps:
     - checkout
@@ -3163,7 +3214,8 @@ jobs:
          paths:
            - .
   build_bionic_mariadb1006_amd64:
-    executor: bionic_mariadb1006
+#    executor: bionic_mariadb1006
+    executor: bionic
     resource_class: large
     steps:
     - checkout
@@ -3184,7 +3236,8 @@ jobs:
          paths:
            - .
   build_focal_percona57_amd64:
-    executor: focal_percona57
+#    executor: focal_percona57
+    executor: focal
     resource_class: large
     steps:
     - checkout
@@ -3205,7 +3258,8 @@ jobs:
          paths:
            - .
   build_focal_percona80_amd64:
-    executor: focal_percona80
+#    executor: focal_percona80
+    executor: focal
     resource_class: large
     steps:
     - checkout
@@ -3226,7 +3280,8 @@ jobs:
          paths:
            - .
   build_focal_mariadb1011_amd64:
-    executor: focal_mariadb1011
+#    executor: focal_mariadb1011
+    executor: focal
     resource_class: large
     steps:
     - checkout
@@ -3247,7 +3302,8 @@ jobs:
          paths:
            - .
   build_focal_mariadb1006_amd64:
-    executor: focal_mariadb1006
+#    executor: focal_mariadb1006
+    executor: focal
     resource_class: large
     steps:
     - checkout
@@ -3268,7 +3324,8 @@ jobs:
          paths:
            - .
   build_jammy_percona57_amd64:
-    executor: jammy_percona57
+#    executor: jammy_percona57
+    executor: jammy
     resource_class: large
     steps:
     - checkout
@@ -3289,7 +3346,8 @@ jobs:
          paths:
            - .
   build_jammy_percona80_amd64:
-    executor: jammy_percona80
+#    executor: jammy_percona80
+    executor: jammy
     resource_class: large
     steps:
     - checkout
@@ -3310,7 +3368,8 @@ jobs:
          paths:
            - .
   build_jammy_mariadb1011_amd64:
-    executor: jammy_mariadb1011
+#    executor: jammy_mariadb1011
+    executor: jammy
     resource_class: large
     steps:
     - checkout
@@ -3331,7 +3390,8 @@ jobs:
          paths:
            - .
   build_jammy_mariadb1006_amd64:
-    executor: jammy_mariadb1006
+#    executor: jammy_mariadb1006
+    executor: jammy
     resource_class: large
     steps:
     - checkout
@@ -3352,7 +3412,8 @@ jobs:
          paths:
            - .
   build_buster_percona57_amd64:
-    executor: buster_percona57
+#    executor: buster_percona57
+    executor: buster
     resource_class: large
     steps:
     - checkout
@@ -3373,7 +3434,8 @@ jobs:
          paths:
            - .
   build_buster_percona80_amd64:
-    executor: buster_percona80
+#    executor: buster_percona80
+    executor: buster
     resource_class: large
     steps:
     - checkout
@@ -3394,7 +3456,8 @@ jobs:
          paths:
            - .
   build_buster_mariadb1011_amd64:
-    executor: buster_mariadb1011
+#    executor: buster_mariadb1011
+    executor: buster
     resource_class: large
     steps:
     - checkout
@@ -3415,7 +3478,8 @@ jobs:
          paths:
            - .
   build_buster_mariadb1006_amd64:
-    executor: buster_mariadb1006
+#    executor: buster_mariadb1006
+    executor: buster
     resource_class: large
     steps:
     - checkout
@@ -3436,7 +3500,8 @@ jobs:
          paths:
            - .
   build_bullseye_percona57_amd64:
-    executor: bullseye_percona57
+#    executor: bullseye_percona57
+    executor: bullseye
     resource_class: large
     steps:
     - checkout
@@ -3457,7 +3522,8 @@ jobs:
          paths:
            - .
   build_bullseye_percona80_amd64:
-    executor: bullseye_percona80
+#    executor: bullseye_percona80
+    executor: bullseye
     resource_class: large
     steps:
     - checkout
@@ -3478,7 +3544,8 @@ jobs:
          paths:
            - .
   build_bullseye_mariadb1011_amd64:
-    executor: bullseye_mariadb1011
+#    executor: bullseye_mariadb1011
+    executor: bullseye
     resource_class: large
     steps:
     - checkout
@@ -3499,7 +3566,8 @@ jobs:
          paths:
            - .
   build_bullseye_mariadb1006_amd64:
-    executor: bullseye_mariadb1006
+#    executor: bullseye_mariadb1006
+    executor: bullseye
     resource_class: large
     steps:
     - checkout
