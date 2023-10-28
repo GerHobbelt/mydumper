@@ -124,7 +124,7 @@ list_all_os=("bionic" "focal" "jammy" "el7" "el8" "el9" "buster" "bullseye" )
 
 #list_build=("bionic_percona80_arm64" "bionic_percona80_amd64" "focal_percona80_arm64" "focal_percona80_amd64" "jammy_percona80_amd64" "jammy_percona80_arm64" "el7_percona57_aarch64" "el7_percona57_x86_64" "el8_percona57_aarch64" "el8_percona57_x86_64" "el9_percona80_aarch64" "el9_percona80_x86_64" "bullseye_percona80_amd64" "bullseye_percona80_arm64" "buster_percona80_arm64" "buster_percona80_amd64")
 
-list_build=("bionic_percona80_amd64" "focal_percona80_amd64" "jammy_percona80_amd64" "el7_mysql80_aarch64" "el7_percona57_x86_64" "el8_mysql80_aarch64" "el8_percona57_x86_64" "el9_mysql80_aarch64" "el9_percona80_x86_64" "bullseye_percona80_amd64" "buster_percona80_amd64")
+list_build=("bionic_percona80_amd64" "focal_percona80_amd64" "jammy_percona80_amd64" "el7_percona57_x86_64" "el8_mysql80_aarch64" "el8_percona57_x86_64" "el9_mysql80_aarch64" "el9_percona80_x86_64" "bullseye_percona80_amd64" "buster_percona80_amd64")
 
 #list_build=("bionic_percona80_amd64" "focal_percona80_amd64" "jammy_percona80_amd64" "el7_percona57_x86_64" "el8_percona57_x86_64" "el9_percona80_x86_64" "bullseye_percona80_amd64" "buster_percona80_amd64")
 
@@ -243,6 +243,21 @@ echo "
 for os in el7 el9
 do
     for vendor in ${list_mysql_version[@]}
+        do
+echo "
+  prepare_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}:
+    steps:
+    - prepare_el_${all_vendors[${vendor}_0]}
+"
+done
+
+done
+
+
+
+for os in ${list_el_os[@]}
+do
+    for vendor in ${list_mariadb_version[@]} ${list_percona_version[@]}
         do
 echo "
   prepare_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}:
@@ -375,7 +390,7 @@ done
 
 for os in ${list_el_os[@]}
 do
-        for vendor in ${list_all_vendors[@]} tidb ${list_mysql_version[@]}
+        for vendor in ${list_all_vendors[@]} tidb
         do
 echo "
   compile_and_test_mydumper_in_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}:
@@ -400,6 +415,34 @@ echo "
            - .
 "
 done
+
+        for vendor in ${list_mysql_version[@]}
+        do
+echo "
+  compile_and_test_mydumper_in_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}:
+    parameters:
+      test:
+        type: boolean
+        default: false
+      e:
+        type: string
+        default: ${all_os[${os}_0]}
+    executor: << parameters.e >>
+    resource_class: large
+    steps:
+    - checkout
+#    - prepare_el
+    - prepare_${os}_${all_vendors[${vendor}_0]}
+    - compile_and_test_mydumper:
+        test: << parameters.test >>
+    - persist_to_workspace:
+         root: /tmp/src/mydumper
+         paths:
+           - .
+"
+done
+
+
 done
 
 for arch in ${list_arch[@]}
@@ -416,7 +459,7 @@ echo "  build_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_
     - checkout
     - set_env_vars
 #    - prepare_el
-    - prepare_el_${all_vendors[${vendor}_0]}
+    - prepare_${os}_${all_vendors[${vendor}_0]}
     - run: mkdir -p /tmp/package
     - run: yum -y install rpmdevtools
     - compile:
