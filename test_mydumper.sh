@@ -260,4 +260,3 @@ $test --no-data -G ${mydumper_general_options} 				-- ${myloader_general_options
 
 #cat $mydumper_log
 #cat $myloader_log
-
