@@ -18,21 +18,7 @@
                     Max Bubenick, Percona RDBA (max dot bubenick at percona dot com)
                     David Ducos, Percona (david dot ducos at percona dot com)
 */
-guint64 gint64_abs(gint64 a);
-void load_chunks_entries(GOptionContext *context);
-GList *get_chunks_for_table(MYSQL *conn, struct db_table * dbt,
-                            struct configuration *conf);
-void get_primary_key(MYSQL *conn, struct db_table * dbt, struct configuration *conf);
-void set_chunk_strategy_for_dbt(MYSQL *conn, struct db_table *dbt);
-void free_char_step(union chunk_step * cs);
-void free_integer_step(union chunk_step * cs);
-union chunk_step *get_next_chunk(struct db_table *dbt);
-gchar * get_max_char( MYSQL *conn, struct db_table *dbt, char *field, gchar min);
-void *chunk_builder_thread(struct configuration *conf);
-void initialize_chunk();
-void finalize_chunk();
-void give_me_another_non_innodb_chunk_step();
-void give_me_another_innodb_chunk_step();
-gboolean get_new_minmax (struct thread_data *td, struct db_table *dbt, union chunk_step *cs);
-gchar* update_cursor (MYSQL *conn, struct table_job *tj);
-void next_chunk_in_char_step(union chunk_step * cs);
+union chunk_step *new_real_partition_step(GList *partition, guint deep, guint number);
+union chunk_step *get_next_partition_chunk(struct db_table *dbt);
+GList * get_partitions_for_table(MYSQL *conn, struct db_table *dbt);
+void process_partition_chunk(struct table_job *tj);
