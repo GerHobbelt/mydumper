@@ -1067,9 +1067,8 @@ void create_job_to_dump_checksum(struct db_table * dbt, struct configuration *co
   return;
 }
 
-int initialize_fn(gchar ** sql_filename, struct db_table * dbt, FILE ** sql_file, guint64 fn, guint sub_part, const gchar *extension, gchar * f(), gchar **stdout_fn){
+int initialize_fn(gchar ** sql_filename, struct db_table * dbt, FILE ** sql_file, guint64 fn, guint sub_part, gchar * f(), gchar **stdout_fn){
 (void)stdout_fn;
-(void)extension;
   int r=0;
   if (*sql_filename)
     g_free(*sql_filename);
@@ -1079,22 +1078,21 @@ int initialize_fn(gchar ** sql_filename, struct db_table * dbt, FILE ** sql_file
 }
 
 void initialize_sql_fn(struct table_job * tj){
-  tj->child_process=initialize_fn(&(tj->sql_filename),tj->dbt,&(tj->sql_file), tj->nchunk, tj->sub_part,"sql", &build_data_filename, &(tj->exec_out_filename));
+  tj->child_process=initialize_fn(&(tj->sql_filename),tj->dbt,&(tj->sql_file), tj->nchunk, tj->sub_part, &build_data_filename, &(tj->exec_out_filename));
 }
 
 void initialize_load_data_fn(struct table_job * tj){
-  tj->child_process=initialize_fn(&(tj->dat_filename),tj->dbt,&(tj->dat_file), tj->nchunk, tj->sub_part,"dat", &build_load_data_filename, &(tj->exec_out_filename));
+  tj->child_process=initialize_fn(&(tj->dat_filename),tj->dbt,&(tj->dat_file), tj->nchunk, tj->sub_part, &build_load_data_filename, &(tj->exec_out_filename));
 }
 
 gboolean update_files_on_table_job(struct table_job *tj){
   if (tj->sql_file == NULL){
-    if (tj->chunk_step_item->chunk_type == INTEGER && tj->chunk_step_item->chunk_step && min_chunk_step_size == rows_per_file && max_chunk_step_size == rows_per_file){
+    if (tj->chunk_step_item->chunk_type == INTEGER && tj->chunk_step_item->chunk_step->integer_step.is_step_fixed_length ){
       if (tj->chunk_step_item->chunk_step->integer_step.is_unsigned)
         tj->sub_part = tj->chunk_step_item->chunk_step->integer_step.type.unsign.min / tj->chunk_step_item->chunk_step->integer_step.step + 1; 
       else
         tj->sub_part = tj->chunk_step_item->chunk_step->integer_step.type.sign.min   / tj->chunk_step_item->chunk_step->integer_step.step + 1;
     }
-    
 
     if (load_data){
       initialize_load_data_fn(tj);
@@ -1109,14 +1107,14 @@ gboolean update_files_on_table_job(struct table_job *tj){
 }
 
 
-struct table_job * new_table_job(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, struct chunk_step_item *chunk_step_item, gboolean update_where){
+struct table_job * new_table_job(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, struct chunk_step_item *chunk_step_item){
   struct table_job *tj = g_new0(struct table_job, 1);
 // begin Refactoring: We should review this, as dbt->database should not be free, so it might be no need to g_strdup.
   // from the ref table?? TODO
 //  tj->database=dbt->database->name;
 //  tj->table=g_strdup(dbt->table);
 // end
-//  g_debug("new_table_job");
+//  g_message("new_table_job on %s.%s with nchuk: %"G_GUINT64_FORMAT, dbt->database->name, dbt->table,nchunk);
   tj->partition=g_strdup(partition);
   tj->chunk_step_item = chunk_step_item;
   tj->where=NULL;
@@ -1134,25 +1132,56 @@ struct table_job * new_table_job(struct db_table *dbt, char *partition, guint64 
   tj->char_chunk_part=char_chunk;
   tj->child_process=0;
   tj->where=g_string_new("");
-  if (update_where){
-    update_estimated_remaining_chunks_on_dbt(tj->dbt);
-    update_where_on_table_job(NULL, tj);
-  }
+  update_estimated_remaining_chunks_on_dbt(tj->dbt);
   return tj;
 }
 
-struct job * create_job_to_dump_chunk_without_enqueuing(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, struct chunk_step_item *chunk_step_item, gboolean update_where){
+
+// Free structures
+void free_table_job(struct table_job *tj){
+//  g_message("free_table_job");
+
+  if (tj->sql_file){
+    m_close(tj->td->thread_id, tj->sql_file, tj->sql_filename, tj->filesize, tj->dbt);
+    tj->sql_file=NULL;
+  }
+  if (tj->dat_file){
+    m_close(tj->td->thread_id, tj->dat_file, tj->dat_filename, tj->filesize, tj->dbt);
+    tj->dat_file=NULL;
+  }
+
+  if (tj->where!=NULL)
+    g_string_free(tj->where,TRUE);
+  if (tj->order_by)
+    g_free(tj->order_by);
+  if (tj->sql_filename){
+    g_free(tj->sql_filename);
+  }
+  g_free(tj);
+}
+
+
+
+
+
+
+
+
+
+
+
+struct job * create_job_to_dump_chunk_without_enqueuing(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, struct chunk_step_item *chunk_step_item){
   struct job *j = g_new0(struct job,1);
-  struct table_job *tj = new_table_job(dbt, partition, nchunk, order_by, chunk_step_item, update_where);
+  struct table_job *tj = new_table_job(dbt, partition, nchunk, order_by, chunk_step_item);
   j->job_data=(void*) tj;
   j->type= dbt->is_innodb ? JOB_DUMP : JOB_DUMP_NON_INNODB;
   j->job_data = (void *)tj;
   return j;
 }
 
-void create_job_to_dump_chunk(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, struct chunk_step_item *chunk_step_item, void f(), GAsyncQueue *queue, gboolean update_where){
+void create_job_to_dump_chunk(struct db_table *dbt, char *partition, guint64 nchunk, char *order_by, struct chunk_step_item *chunk_step_item, void f(), GAsyncQueue *queue){
   struct job *j = g_new0(struct job,1);
-  struct table_job *tj = new_table_job(dbt, partition, nchunk, order_by, chunk_step_item, update_where);
+  struct table_job *tj = new_table_job(dbt, partition, nchunk, order_by, chunk_step_item);
   j->job_data=(void*) tj;
   j->type= dbt->is_innodb ? JOB_DUMP : JOB_DUMP_NON_INNODB;
   f(queue,j);
