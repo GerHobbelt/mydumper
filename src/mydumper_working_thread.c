@@ -431,7 +431,6 @@ void m_async_queue_push_conservative(GAsyncQueue *queue, struct job *element){
   g_async_queue_push(queue, element);
 }
 
-void process_char_chunk(struct thread_data *td, struct table_job *tj);
 
 void thd_JOB_DUMP(struct thread_data *td, struct job *job){
   struct table_job *tj = (struct table_job *)job->job_data;
@@ -1166,6 +1165,7 @@ void get_primary_key_string_old(MYSQL *conn, struct db_table * dbt) {
 
 struct db_table *new_db_table( MYSQL *conn, struct configuration *conf, struct database *database, char *table, char *table_collation, char *datalength, guint64 rows_in_sts){
   struct db_table *dbt = g_new(struct db_table, 1);
+  dbt->status = UNDEFINED;
   dbt->database = database;
   dbt->table = g_strdup(table);
   dbt->table_filename = get_ref_table(dbt->table);
@@ -1201,6 +1201,7 @@ struct db_table *new_db_table( MYSQL *conn, struct configuration *conf, struct d
 //  dbt->chunk_type_item.chunk_type = UNDEFINED;
 //  dbt->chunk_type_item.chunk_step = NULL;
   dbt->chunks=NULL;
+//  dbt->initial_chunk_step=NULL;
   dbt->insert_statement=NULL;
   dbt->chunks_mutex=g_mutex_new();
 //  g_mutex_lock(dbt->chunks_mutex);
