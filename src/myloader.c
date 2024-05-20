@@ -142,11 +142,10 @@ gint compare_by_time(gconstpointer a, gconstpointer b){
 }
 
 
-void show_dbt(void* key, void* dbt, void *total){
-  (void) key;
+void show_dbt(void* _key, void* dbt, void *total){
   (void) dbt;
   (void) total;
-  g_message("Table %s", (char*) key);
+  g_message("Table %s", (char*) _key);
 //  *((guint *)total)= 100;
 //  //    if (((struct db_table*)dbt)->schema_state >= CREATED)
 //  //        *((guint *)total)= *((guint *)total) + 1;
@@ -154,31 +153,23 @@ void show_dbt(void* key, void* dbt, void *total){
   }
 
 void create_database(struct thread_data *td, gchar *database) {
-  gchar *query = NULL;
 
   const gchar *filename =
-      g_strdup_printf("%s-schema-create.sql", database);
-  const gchar *filenamegz =
       g_strdup_printf("%s-schema-create.sql%s", database, exec_per_thread_extension);
-  const gchar *filepath = g_strdup_printf("%s/%s-schema-create.sql",
-                                          directory, database);
-  const gchar *filepathgz = g_strdup_printf("%s/%s-schema-create.sql%s",
+  const gchar *filepath = g_strdup_printf("%s/%s-schema-create.sql%s",
                                             directory, database, exec_per_thread_extension);
 
   if (g_file_test(filepath, G_FILE_TEST_EXISTS)) {
-    g_atomic_int_add(&(detailed_errors.schema_errors), restore_data_from_file(td, database, NULL, filename, TRUE));
-  } else if (g_file_test(filepathgz, G_FILE_TEST_EXISTS)) {
-    g_atomic_int_add(&(detailed_errors.schema_errors), restore_data_from_file(td, database, NULL, filenamegz, TRUE));
+    g_atomic_int_add(&(detailed_errors.schema_errors), restore_data_from_file(td, filename, TRUE, NULL));
   } else {
-    query = g_strdup_printf("CREATE DATABASE IF NOT EXISTS `%s`", database);
-    if (!m_query(td->thrconn, query, m_warning, "Fail to create database: %s", database))
+    GString *data = g_string_new("CREATE DATABASE IF NOT EXISTS ");
+    g_string_append_printf(data,"`%s`", database);
+    if (restore_data_in_gstring_extended(td, data , TRUE, NULL, m_critical, "Failed to create database: %s", database) )
+	      //	    m_query(td->connection_data.thrconn, query, m_warning, "Fail to create database: %s", database))
       g_atomic_int_inc(&(detailed_errors.schema_errors));
-//    if (mysql_query(td->thrconn, query)){
-//      g_warning("Fail to create database: %s", database);
-//    }
+    g_string_free(data, TRUE);
   }
 
-  g_free(query);
   return;
 }
 
@@ -223,10 +214,6 @@ int main(int argc, char *argv[]) {
   initialize_share_common();
   signal(SIGCHLD, SIG_IGN);
 
-  if (db == NULL && source_db != NULL) {
-    db = g_strdup(source_db);
-  }
-
   context = load_contex_entries();
 
   gchar ** tmpargv=g_strdupv(argv);
@@ -236,9 +223,12 @@ int main(int argc, char *argv[]) {
   }
   g_strfreev(tmpargv);
 
+  if (db == NULL && source_db != NULL) {
+    db = g_strdup(source_db);
+  }
+
   if (help){
     printf("%s", g_option_context_get_help (context, FALSE, NULL));
-    exit(0);
   }
 
   if (debug) {
@@ -289,12 +279,10 @@ int main(int argc, char *argv[]) {
   if (pmm){
 
     g_message("Using PMM resolution %s at %s", pmm_resolution, pmm_path);
-    GError *serror;
     pmmthread =
-        g_thread_create(pmm_thread, &conf, FALSE, &serror);
+        g_thread_new("myloader_pmm",pmm_thread, &conf);
     if (pmmthread == NULL) {
-      m_critical("Could not create pmm thread: %s", serror->message);
-      g_error_free(serror);
+      m_critical("Could not create pmm thread");
     }
   }
 //  initialize_job(purge_mode_str);
@@ -311,18 +299,23 @@ int main(int argc, char *argv[]) {
       g_date_time_unref(datetime);
       g_free(datetimestr); 
     }else{
-      m_critical("a directory needs to be specified, see --help\n");
+      if(!help)
+        m_critical("a directory needs to be specified, see --help\n");
     }
   } else {
     directory=g_str_has_prefix(input_directory,"/")?input_directory:g_strdup_printf("%s/%s", current_dir, input_directory);
-    if (!g_file_test(input_directory,G_FILE_TEST_IS_DIR)){
-      if (stream){
+    if (stream){
+      if (!g_file_test(input_directory,G_FILE_TEST_IS_DIR)){
         create_backup_dir(directory,fifo_directory);
       }else{
+        if (!no_stream){
+          m_critical("Backup directory (-d) must not exist when --stream / --stream=TRADITIONAL");
+        }
+      }
+    }else{
+      if (!g_file_test(input_directory,G_FILE_TEST_IS_DIR)){
         m_critical("the specified directory doesn't exists\n");
       }
-    }
-    if (!stream){
       char *p = g_strdup_printf("%s/metadata", directory);
       if (!g_file_test(p, G_FILE_TEST_EXISTS)) {
         m_critical("the specified directory %s is not a mydumper backup",directory);
@@ -340,6 +333,79 @@ int main(int argc, char *argv[]) {
     fifo_directory=directory;
   }
 
+  if (help){
+    print_string("host", hostname);
+    print_string("user", username);
+    print_string("password", password);
+    print_bool("ask-password",askPassword);
+    print_int("port",port);
+    print_string("socket",socket_path);
+    print_string("protocol", protocol_str);
+    print_bool("compress-protocol",compress_protocol);
+    print_bool("ssl",ssl);
+    print_string("ssl-mode",ssl_mode);
+    print_string("key",key);
+    print_string("cert", cert);
+    print_string("ca",ca);
+    print_string("capath",capath);
+    print_string("cipher",cipher);
+    print_string("tls-version",tls_version);
+    print_list("regex",regex_list);
+    print_string("source-db",source_db);
+
+    print_bool("skip-triggers",skip_triggers);
+    print_bool("skip-post",skip_post);
+    print_bool("no-data",no_data);
+
+    print_string("omit-from-file",tables_skiplist_file);
+    print_string("tables-list",tables_list);
+    print_string("pmm-path",pmm_path);
+    print_string("pmm-resolution",pmm_resolution);
+
+    print_bool("enable-binlog",enable_binlog);
+    print_string("innodb-optimize-keys",innodb_optimize_keys_str);
+    print_bool("no-schemas",no_schemas);
+
+    print_string("purge-mode",purge_mode_str);
+    print_bool("disable-redo-log",disable_redo_log);
+    print_string("checksum",checksum_str);
+    print_bool("overwrite-tables",overwrite_tables);
+    print_bool("overwrite-unsafe",overwrite_unsafe);
+    print_int("retry-count",retry_count);
+    print_bool("serialized-table-creation",serial_tbl_creation);
+    print_bool("stream",stream);
+
+    print_int("max-threads-per-table",max_threads_per_table);
+    print_int("max-threads-for-index-creation",max_threads_for_index_creation);
+    print_int("max-threads-for-post-actions",max_threads_for_post_creation);
+    print_int("max-threads-for-schema-creation",max_threads_for_schema_creation);
+    print_string("exec-per-thread",exec_per_thread);
+    print_string("exec-per-thread-extension",exec_per_thread_extension);
+
+    print_int("rows",rows);
+    print_int("queries-per-transaction",commit_count);
+    print_bool("append-if-not-exist",append_if_not_exist);
+    print_string("set-names",set_names_str);
+
+    print_bool("skip-definer",skip_definer);
+    print_bool("help",help);
+
+    print_string("directory",input_directory);
+    print_string("logfile",logfile);
+
+    print_string("database",db);
+    print_string("quote-character",identifier_quote_character_str);
+    print_bool("resume",resume);
+    print_int("threads",num_threads);
+    print_bool("version",program_version);
+    print_bool("verbose",verbose);
+    print_bool("debug",debug);
+    print_string("defaults-file",defaults_file);
+    print_string("defaults-extra-file",defaults_extra_file);
+    print_string("fifodir",fifo_directory);
+    exit(EXIT_SUCCESS);
+  }
+
   g_free(current_dir);
   g_chdir(directory);
   /* Process list of tables to omit if specified */
@@ -349,12 +415,10 @@ int main(int argc, char *argv[]) {
   initialize_common();
   initialize_connection(MYLOADER);
   initialize_regex(NULL);
-  GError *serror;
   GThread *sthread =
-      g_thread_create(signal_thread, &conf, FALSE, &serror);
+      g_thread_new("myloader_signal",signal_thread, &conf);
   if (sthread == NULL) {
-    m_critical("Could not create signal thread: %s", serror->message);
-    g_error_free(serror);
+    m_critical("Could not create signal thread");
   }
 
   MYSQL *conn;
@@ -377,21 +441,14 @@ int main(int argc, char *argv[]) {
   execute_gstring(conn, set_session);
   execute_gstring(conn, set_global);
 
-  // TODO: we need to set the variables in the initilize session varibles, not from:
-//  if (mysql_query(conn, "SET SESSION wait_timeout = 2147483")) {
-//    g_warning("Failed to increase wait_timeout: %s", mysql_error(conn));
-//  }
-
   if (disable_redo_log){
     if ((get_major() == 8) && (get_secondary() == 0) && (get_revision() > 21)){
       g_message("Disabling redologs");
       m_query(conn, "ALTER INSTANCE DISABLE INNODB REDO_LOG", m_critical, "DISABLE INNODB REDO LOG failed");
-//      mysql_query(conn, "ALTER INSTANCE DISABLE INNODB REDO_LOG");
     }else{
       m_error("Disabling redologs is not supported for version %d.%d.%d", get_major(), get_secondary(), get_revision());
     }
   }
-//  mysql_query(conn, "/*!40014 SET FOREIGN_KEY_CHECKS=0*/");
   // To here.
   conf.database_queue = g_async_queue_new();
   conf.table_queue = g_async_queue_new();
@@ -418,15 +475,13 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  struct thread_data t;
-  t.thread_id = 0;
-  t.conf = &conf; // TODO: if conf is singleton it must be accessed as global variable
-  t.thrconn = conn;
-  t.current_database=NULL;
-  t.status=WAITING;
+  initialize_connection_pool();
+  struct thread_data *t=g_new(struct thread_data,1);
+  initialize_thread_data(t, &conf, WAITING, 0, NULL);
+//  t.connection_data.thrconn = conn;
 
   if (database_db){
-    create_database(&t, database_db->real_database);
+    create_database(t, database_db->real_database);
     database_db->schema_state=CREATED;
   }
 
@@ -455,6 +510,14 @@ int main(int argc, char *argv[]) {
   }else{
     process_directory(&conf);
   }
+  GList * tl=conf.table_list;
+  while (tl != NULL){
+    if(((struct db_table *)(tl->data))->max_connections_per_job==1){
+      ((struct db_table *)(tl->data))->max_connections_per_job=0;
+    }
+    tl=tl->next;
+  }
+
   wait_schema_worker_to_finish();
   wait_loader_threads_to_finish();
   create_index_shutdown_job(&conf);
@@ -473,7 +536,6 @@ int main(int argc, char *argv[]) {
   conf.data_queue=NULL;
 
   gboolean checksum_ok=TRUE;
-  GList * tl=conf.table_list;
   while (tl != NULL){
     checksum_ok&=checksum_dbt(tl->data, conn);
     tl=tl->next;
@@ -504,9 +566,9 @@ int main(int argc, char *argv[]) {
   if (!checksum_ok)
     g_error("Checksum failed");
 
-  if (stream && no_delete == FALSE && input_directory == NULL){
-    m_remove(directory,"metadata");
-    m_remove(directory, "metadata.header");
+  if (stream && no_delete == FALSE ){ //&& input_directory == NULL){
+//    m_remove(directory,"metadata");
+//    m_remove(directory, "metadata.header");
     if (g_rmdir(directory) < 0)
         g_warning("Restore directory not removed: %s (%s)", directory, strerror(errno));
   }

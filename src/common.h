@@ -102,6 +102,7 @@ void load_per_table_info_from_key_file(GKeyFile *kf, struct configuration_per_ta
 void refresh_set_session_from_hash(GString *ss, GHashTable * set_session_hash);
 void refresh_set_global_from_hash(GString *ss, GString *sr, GHashTable * set_global_hash);
 gboolean is_table_in_list(gchar *database, gchar *table, gchar **tl);
+gboolean is_mysql_special_tables(gchar *database, gchar *table);
 GHashTable * initialize_hash_of_session_variables();
 void load_common_entries(GOptionGroup *main_group);
 void free_hash(GHashTable * set_session_hash);
@@ -130,6 +131,11 @@ void load_hash_of_all_variables_perproduct_from_key_file(GKeyFile *kf, GHashTabl
 GRecMutex * g_rec_mutex_new();
 gboolean read_data(FILE *file, GString *data, gboolean *eof, guint *line);
 gchar *m_date_time_new_now_local();
+
+void print_int(const char*_key, int val);
+void print_string(const char*_key, const char *val);
+void print_bool(const char*_key, gboolean val);
+void print_list(const char*_key, GList *list);
 
 gchar *get_zstd_cmd();
 gchar *get_gzip_cmd();

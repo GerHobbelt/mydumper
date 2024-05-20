@@ -365,8 +365,8 @@ void refresh_set_from_hash(GString *ss, const gchar * kind, GHashTable * set_has
   }
 }
 
-void set_session_hash_insert(GHashTable * set_session_hash, const gchar *key, gchar *value){
-  g_hash_table_insert(set_session_hash, g_utf8_strup(key, strlen(key)), value);
+void set_session_hash_insert(GHashTable * set_session_hash, const gchar *_key, gchar *value){
+  g_hash_table_insert(set_session_hash, g_utf8_strup(_key, strlen(_key)), value);
 }
 
 void refresh_set_session_from_hash(GString *ss, GHashTable * set_session_hash){
@@ -554,31 +554,78 @@ gboolean m_remove(gchar * directory, const gchar * filename){
   return TRUE;
 }
 
-gboolean is_table_in_list(gchar *database, gchar *table, gchar **tl){
-  gchar * table_name=g_strdup_printf("%s.%s", database, table);
-  guint i = 0;
-  for (i = 0; tl[i] != NULL; i++) {
-    if (g_ascii_strcasecmp(tl[i], table_name) == 0){
-      g_free(table_name);
+gboolean matchText(const gchar *a, const gchar *b) {
+  guint ai = 0;
+  guint bi = 0;
+  while ( a[ai] != '%' && a[ai] != '\0' && b[bi] != '\0') {
+    if ((a[ai] == '_') || (a[ai] == b[bi])){
+      ai++;
+      bi++;
+    } else if (a[ai] == '\\' && a[ai+1] == '_' && b[bi] == '_') {
+      ai+=2;
+      bi++;
+    } else {
+      return FALSE;
+    }
+  }
+  if (a[ai] == '\0' ) {
+    return b[bi] == '\0';
+  }
+  for (; a[ai] == '%' || a[ai] == '\0';ai++) {
+    if (a[ai] == '\0') {
       return TRUE;
     }
   }
-  g_free(table_name);
+  for (; b[bi] != '\0'; bi++) {
+    if (matchText(a + ai, b + bi)) {
+      return TRUE;
+    }
+  }
   return FALSE;
 }
 
+gboolean is_table_in_list(gchar *database, gchar *table, gchar **tl){
+  gchar * table_name_lower=g_ascii_strdown(g_strdup_printf("%s.%s", database, table),-1);
+  gchar* tb_lower = NULL;
+  gboolean match = FALSE;
+  for (guint i = 0; tl[i] != NULL; i++) {
+    // no need use match text
+    if (g_strrstr(tl[i], "%") == NULL && g_strrstr(tl[i], "_") == NULL) {
+       if (g_ascii_strcasecmp(tl[i], table_name_lower) == 0) {
+         match = TRUE;
+         break;
+       }
+    } else {
+      tb_lower = g_ascii_strdown(tl[i], -1);
+      if (matchText(tb_lower, table_name_lower)) {
+        match = TRUE;
+        break;
+      }
+    } 
+  }
+  g_free(table_name_lower);
+  g_free(tb_lower);
+  return match;
+}
 
+gboolean is_mysql_special_tables(gchar *database, gchar *table){
+  return g_ascii_strcasecmp(database, "mysql") == 0 &&
+        (g_ascii_strcasecmp(table, "general_log") == 0 ||
+         g_ascii_strcasecmp(table, "slow_log") == 0 ||
+         g_ascii_strcasecmp(table, "innodb_index_stats") == 0 ||
+         g_ascii_strcasecmp(table, "innodb_table_stats") == 0);
+}
 
 void m_key_file_merge(GKeyFile *b, GKeyFile *a){
   gsize  group_len = 0, key_len=0;
-  gchar **group = g_key_file_get_groups (a, &group_len), **key=NULL;
+  gchar **group = g_key_file_get_groups (a, &group_len), **_key=NULL;
   
   guint g=0, k=0;
   GError *error=NULL;
   for( g=0; g<group_len; g++ ){
-    key=g_key_file_get_keys(a, group[g], &key_len, &error );
+    _key=g_key_file_get_keys(a, group[g], &key_len, &error );
     for(k=0; k<key_len; k++ ){
-      g_key_file_set_value(b, group[g], key[k], g_key_file_get_value(a, group[g], key[k], &error));
+      g_key_file_set_value(b, group[g], _key[k], g_key_file_get_value(a, group[g], _key[k], &error));
     }
   }
 
@@ -710,12 +757,16 @@ gboolean stream_arguments_callback(const gchar *option_name,const gchar *value, 
     if (value==NULL || g_strstr_len(value,11,"TRADITIONAL")){
       return TRUE;
     }
-    if (g_strstr_len(value,9,"NO_DELETE")){
+    if (strlen(value)==9 && g_strstr_len(value,9,"NO_DELETE")){
       no_delete=TRUE;
       return TRUE;
     }
     if (g_strstr_len(value,23,"NO_STREAM_AND_NO_DELETE")){
       no_delete=TRUE;
+      no_stream=TRUE;
+      return TRUE;
+    }
+    if (strlen(value)==9 && g_strstr_len(value,9,"NO_STREAM")){
       no_stream=TRUE;
       return TRUE;
     }
@@ -1045,3 +1096,38 @@ void trace(const char *format, ...)
   va_end(args);
   g_debug("%s", msg);
 }
+
+#define WIDTH 40
+
+void print_int(const char*_key, int val){
+  printf("%s%*s= %d\n",_key, WIDTH-(int)(strlen(_key)),"", val);
+}
+
+void print_string(const char*_key, const char *val){
+  if (val)
+    printf("%s%*s= %s\n",_key, WIDTH-(int)(strlen(_key)),"", val);
+  else
+    printf("# %s%*s= ""\n",_key, WIDTH-(int)(strlen(_key)) -2,"");
+}
+
+void print_bool(const char*_key, gboolean val){
+  if (val)
+    printf("%s%*s= TRUE\n",_key, WIDTH-(int)(strlen(_key)),"");
+  else
+    printf("# %s%*s= FALSE\n",_key, WIDTH-(int)(strlen(_key)) - 2 ,"");
+}
+
+void print_list(const char*_key, GList *list){
+  if (list){
+    printf("%s%*s= \"%s\"", _key, WIDTH-(int)(strlen(_key)), "", (gchar *)(list->data));
+    list=list->next;
+    while (list){
+      printf(",\"%s\"", (gchar*)(list->data));
+      list=list->next;
+    }
+    printf("\n");
+  }else{
+    printf("# %s%*s= \"\"\n", _key, WIDTH-(int)(strlen(_key)) - 2, "");
+  }
+}
+
