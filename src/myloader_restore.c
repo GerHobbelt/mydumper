@@ -32,21 +32,26 @@
 #include "myloader_restore.h"
 
 struct statement * new_statement();
-
 gboolean skip_definer = FALSE;
 GAsyncQueue *connection_pool = NULL;
 GAsyncQueue *restore_queues=NULL;
 GAsyncQueue *free_results_queue=NULL;
 
-void *restore_thread(struct connection_data *cd);
+void *restore_thread(MYSQL *thrconn);
 struct statement release_connection_statement = {0, 0, NULL, NULL, CLOSE, FALSE, NULL, 0};
+struct io_restore_result end_restore_thread = { NULL, NULL};
 
+GThread **restore_threads=NULL;
 
-struct connection_data *new_connection_data(){
+struct connection_data *new_connection_data(MYSQL *thrconn){
   struct connection_data *cd=g_new(struct connection_data,1);
-  cd->thrconn = mysql_init(NULL);
+  if (thrconn)
+    cd->thrconn = thrconn;
+  else{
+    cd->thrconn = mysql_init(NULL);
+    m_connect(cd->thrconn);
+  }
   cd->current_database=NULL;
-  m_connect(cd->thrconn);
 /*  if (!database_db){
     cd->current_database=database_db;
     if (execute_use(cd)){
@@ -57,7 +62,9 @@ struct connection_data *new_connection_data(){
   cd->thread_id=mysql_thread_id(cd->thrconn);
   cd->ready=g_async_queue_new();
   cd->queue=NULL;
+  cd->in_use=g_mutex_new();
   execute_gstring(cd->thrconn, set_session);
+  g_async_queue_push(connection_pool,cd);
   return cd;
 }
 struct io_restore_result *new_io_restore_result(){
@@ -66,58 +73,76 @@ struct io_restore_result *new_io_restore_result(){
   iors->restore=g_async_queue_new();
   return iors;
 }
-void initialize_connection_pool(){
+
+GList *ignore_errors_list=NULL;
+gchar *ignore_errors=NULL;
+
+void initialize_connection_pool(MYSQL *thrconn){
   guint n=0;
+  if (ignore_errors){
+    gchar **tmp_ignore_errors_list = g_strsplit(ignore_errors, ",", 0);
+    while(tmp_ignore_errors_list[n]!=NULL){
+      ignore_errors_list=g_list_append(ignore_errors_list,GINT_TO_POINTER(atoi(tmp_ignore_errors_list[n])));
+      n++;
+    }
+  }
   connection_pool=g_async_queue_new();
   restore_queues=g_async_queue_new();
   free_results_queue=g_async_queue_new();
-  struct connection_data *cd=NULL;
   struct io_restore_result *iors=NULL;
+  restore_threads=g_new(GThread *, num_threads);
   for (n = 0; n < num_threads; n++) {
-    cd=new_connection_data(); 
-    g_async_queue_push(connection_pool,cd);
     iors=new_io_restore_result();
     g_async_queue_push(restore_queues, iors);
-    g_thread_new("myloader_conn",(GThreadFunc)restore_thread, cd);
+    restore_threads[n]=g_thread_new("myloader_conn",(GThreadFunc)restore_thread, thrconn);
+    thrconn=NULL;
   }
   for (n = 0; n < 8*num_threads; n++) {
     g_async_queue_push(free_results_queue, new_statement());
   }
 }
 
+void wait_restore_threads_to_close(){
+  guint n=0;
+  for (n = 0; n < num_threads; n++)
+    g_thread_join(restore_threads[n]);
+}
+
 int restore_data_in_gstring_by_statement(struct connection_data *cd, GString *data, gboolean is_schema, guint *query_counter)
 {
   guint en=mysql_real_query(cd->thrconn, data->str, data->len);
   if (en) {
-
     if (is_schema)
-      g_warning("Connection %ld: Error restoring %d: %s %s", cd->thread_id, en, data->str, mysql_error(cd->thrconn));
+      g_warning("Connection %ld - ERROR %d: %s\n%s", cd->thread_id, mysql_errno(cd->thrconn), mysql_error(cd->thrconn), data->str);
     else{
-      g_warning("Connection %ld: Error restoring %d: %s", cd->thread_id, en, mysql_error(cd->thrconn));
+      g_warning("Connection %ld - ERROR %d: %s"    , cd->thread_id, mysql_errno(cd->thrconn), mysql_error(cd->thrconn));
     }
 
-    if (mysql_ping(cd->thrconn)) {
-      m_connect(cd->thrconn);
-      cd->thread_id=mysql_thread_id(cd->thrconn);
-      execute_gstring(cd->thrconn, set_session);
-      execute_use(cd);
-      if (!is_schema && commit_count > 1) {
-        g_critical("Connection %ld: Lost connection error", cd->thread_id);
+    if ( mysql_errno(cd->thrconn) != 0 && !g_list_find(ignore_errors_list, GINT_TO_POINTER(mysql_errno(cd->thrconn) ))){
+      if (mysql_ping(cd->thrconn)) {
+        mysql_close(cd->thrconn);
+        cd->thrconn=mysql_init(NULL);
+        m_connect(cd->thrconn);
+        cd->thread_id=mysql_thread_id(cd->thrconn);
+        execute_gstring(cd->thrconn, set_session);
+        execute_use(cd);
+        if (!is_schema && commit_count > 1) {
+          g_critical("Connection %ld - ERROR %d: Lost connection error", cd->thread_id,  mysql_errno(cd->thrconn));
+          errors++;
+          return 2;
+        }
+      }
+
+      g_atomic_int_inc(&(detailed_errors.retries));
+      if (mysql_real_query(cd->thrconn, data->str, data->len)) {
+        if (is_schema)
+          g_critical("Connection %ld - ERROR %d: %s\n%s", cd->thread_id, mysql_errno(cd->thrconn), mysql_error(cd->thrconn), data->str);
+        else{
+          g_critical("Connection %ld - ERROR %d: %s"    , cd->thread_id, mysql_errno(cd->thrconn), mysql_error(cd->thrconn));
+        }
         errors++;
-        return 2;
+        return 1;
       }
-    }
-
-    g_warning("Connection %ld: Retrying last failed executed statement", cd->thread_id);
-    g_atomic_int_inc(&(detailed_errors.retries));
-    if (mysql_real_query(cd->thrconn, data->str, data->len)) {
-      if (is_schema)
-        g_critical("Connection %ld: Error restoring: %s %s", cd->thread_id, data->str, mysql_error(cd->thrconn));
-      else{
-        g_critical("Connection %ld: Error restoring: %s", cd->thread_id, mysql_error(cd->thrconn));
-      }
-      errors++;
-      return 1;
     }
   }
   *query_counter=*query_counter+1;
@@ -126,7 +151,6 @@ int restore_data_in_gstring_by_statement(struct connection_data *cd, GString *da
       if (*query_counter == commit_count) {
         *query_counter= 0;
         if (!m_query(cd->thrconn, "COMMIT", m_warning, "COMMIT failed")) {
-          g_warning("Connection %ld: COMMIT failed: %s", cd->thread_id, mysql_error(cd->thrconn));
           errors++;
           return 2;
         }
@@ -139,8 +163,28 @@ int restore_data_in_gstring_by_statement(struct connection_data *cd, GString *da
   return 0;
 }
 
+struct connection_data *close_restore_thread(gboolean return_connection){
+  struct connection_data *cd=g_async_queue_pop(connection_pool);
+  g_async_queue_push(cd->ready, &end_restore_thread);
+  if (return_connection)
+    return cd;
+  return NULL;
+}
+
+
 void setup_connection(struct connection_data *cd, struct thread_data *td, struct io_restore_result *io_restore_result , gboolean start_transaction, struct database *use_database, GString *header){
   trace("Thread %d: Connection %ld granted", td->thread_id, cd->thread_id);
+  if (mysql_ping(cd->thrconn)) {
+    g_warning("Thread %d: Connection %ld failed", td->thread_id, cd->thread_id);
+    if (mysql_thread_id(cd->thrconn) == cd->thread_id ){
+      mysql_close(cd->thrconn);
+      cd->thrconn=mysql_init(NULL);
+      m_connect(cd->thrconn);
+    }
+    cd->thread_id=mysql_thread_id(cd->thrconn);
+    g_warning("Thread %d: New connection %ld established", td->thread_id, cd->thread_id);
+    execute_gstring(cd->thrconn, set_session);
+  }
   cd->transaction=start_transaction;
   if (use_database)
     execute_use_if_needs_to(cd, use_database, "request_another_connection");
@@ -207,6 +251,11 @@ int restore_insert(struct connection_data *cd,
       if (tr > 0){
         g_critical("Connection %ld: Error occurs between lines: %d and %d in a splited INSERT: %s",cd->thread_id, offset_line,current_offset_line,mysql_error(cd->thrconn));
       }
+      if (mysql_warning_count(cd->thrconn)){
+        g_warning("Connection %ld: Warnings found during INSERT between lines: %d and %d: %s",cd->thread_id, offset_line,current_offset_line, show_warnings_if_possible(cd->thrconn));
+//        show_warnings_if_possible(cd->thrconn);
+          
+      }
       cd=NULL;
     }else
       tr=0;
@@ -221,12 +270,15 @@ int restore_insert(struct connection_data *cd,
 
 
 
-void *restore_thread(struct connection_data *cd){
+void *restore_thread(MYSQL *thrconn){
+  struct connection_data *cd=new_connection_data(thrconn);
   struct statement *ir=NULL;
   guint query_counter=0;
-
+//  g_mutex_lock(cd->in_use);
   while (1){
     cd->queue=g_async_queue_pop(cd->ready);
+    if (cd->queue->restore == NULL)
+      break;
     while(1) {
       ir=g_async_queue_pop(cd->queue->restore);
       if (ir->kind_of_statement == CLOSE){
@@ -277,6 +329,7 @@ void *restore_thread(struct connection_data *cd){
     trace("Returning connection to pool: %ld", cd->thread_id);
     g_async_queue_push(connection_pool,cd);
   }
+//  g_mutex_unlock(cd->in_use);
   return NULL;
 }
 

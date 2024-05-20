@@ -32,6 +32,7 @@
 GAsyncQueue *stream_queue = NULL;
 gboolean use_defer= FALSE;
 gboolean check_row_count= FALSE;
+gboolean show_warnings=FALSE;
 
 /*
 const char *usr_bin_zstd_cmd[] = {"/usr/bin/zstd", "-c", NULL};
@@ -143,6 +144,26 @@ void initialize_set_names(){
 void free_set_names(){
   g_free(set_names_str);
   g_free(set_names_statement);
+}
+
+
+char *show_warnings_if_possible(MYSQL *conn){
+  if (!show_warnings)
+    return NULL;
+  MYSQL_RES *result = NULL;
+  MYSQL_ROW row;
+  if (mysql_query(conn, "SHOW WARNINGS") || !(result = mysql_use_result(conn))) {
+    g_critical("Error on SHOW WARNINGS: %s", mysql_error(conn));
+    return NULL;
+  }
+  GString *_error=g_string_new("");
+  row = mysql_fetch_row(result);
+  while (row){
+    g_string_append(_error,row[2]);
+    g_string_append(_error,"\n");
+    row = mysql_fetch_row(result);
+  }
+  return g_string_free(_error, FALSE);
 }
 
 char *generic_checksum(MYSQL *conn, char *database, char *table, int *errn,const gchar *query_template, int column_number){
@@ -1131,3 +1152,69 @@ void print_list(const char*_key, GList *list){
   }
 }
 
+void append_alter_table(GString * alter_table_statement, char *table){
+  g_string_append(alter_table_statement,"ALTER TABLE `");
+  g_string_append(alter_table_statement,table);
+  g_string_append(alter_table_statement,"` ");
+}
+
+void finish_alter_table(GString * alter_table_statement){
+  gchar * str=g_strrstr_len(alter_table_statement->str,alter_table_statement->len,",");
+  if ((str - alter_table_statement->str) > (long int)(alter_table_statement->len - 5)){
+    *str=';';
+    g_string_append_c(alter_table_statement,'\n');
+  }else
+    g_string_append(alter_table_statement,";\n");
+}
+
+int global_process_create_table_statement (gchar * statement, GString *create_table_statement, GString *alter_table_statement, GString *alter_table_constraint_statement, gchar *real_table, gboolean split_indexes){
+  int flag=0;
+  gchar** split_file= g_strsplit(statement, "\n", -1);
+  gchar *autoinc_column=NULL;
+  append_alter_table(alter_table_statement, real_table);
+  append_alter_table(alter_table_constraint_statement, real_table);
+  int fulltext_counter=0;
+  int i=0;
+  for (i=0; i < (int)g_strv_length(split_file);i++){
+    if (split_indexes &&( g_strstr_len(split_file[i],5,"  KEY")
+      || g_strstr_len(split_file[i],8,"  UNIQUE")
+      || g_strstr_len(split_file[i],9,"  SPATIAL")
+      || g_strstr_len(split_file[i],10,"  FULLTEXT")
+      || g_strstr_len(split_file[i],7,"  INDEX")
+      )){
+      // Ignore if the first column of the index is the AUTO_INCREMENT column
+      if ((autoinc_column != NULL) && (g_strrstr(split_file[i],autoinc_column))){
+        g_string_append(create_table_statement, split_file[i]);
+        g_string_append_c(create_table_statement,'\n');
+      }else{
+        flag|=IS_ALTER_TABLE_PRESENT;
+        if (g_strrstr(split_file[i],"  FULLTEXT")) fulltext_counter++;
+        if (fulltext_counter>1){
+          fulltext_counter=1;
+          finish_alter_table(alter_table_statement);
+          append_alter_table(alter_table_statement,real_table);
+        }
+        g_string_append(alter_table_statement,"\n ADD");
+        g_string_append(alter_table_statement, split_file[i]);
+      }
+    }else{
+      if (g_strstr_len(split_file[i],12,"  CONSTRAINT")){
+        flag|=INCLUDE_CONSTRAINT;
+        g_string_append(alter_table_constraint_statement,"\n ADD");
+        g_string_append(alter_table_constraint_statement, split_file[i]);
+      }else{
+        if (g_strrstr(split_file[i],"AUTO_INCREMENT")){
+          gchar** autoinc_split=g_strsplit(split_file[i],"`",3);
+          autoinc_column=g_strdup_printf("(`%s`", autoinc_split[1]);
+        }
+        g_string_append(create_table_statement, split_file[i]);
+        g_string_append_c(create_table_statement,'\n');
+      }
+    }
+    if (g_strrstr(split_file[i],"ENGINE=InnoDB")) flag|=IS_INNODB_TABLE;
+  }
+  g_string_replace(create_table_statement,",\n)","\n)", 0);
+  finish_alter_table(alter_table_statement);
+  finish_alter_table(alter_table_constraint_statement);
+  return flag;
+}

@@ -78,6 +78,8 @@ gboolean enable_binlog = FALSE;
 gboolean disable_redo_log = FALSE;
 enum checksum_modes checksum_mode= CHECKSUM_FAIL;
 gboolean skip_triggers = FALSE;
+gboolean skip_constraints = FALSE;
+gboolean skip_indexes = FALSE;
 gboolean skip_post = FALSE;
 gboolean serial_tbl_creation = FALSE;
 gboolean resume = FALSE;
@@ -354,6 +356,8 @@ int main(int argc, char *argv[]) {
     print_string("source-db",source_db);
 
     print_bool("skip-triggers",skip_triggers);
+    print_bool("skip-constraints",skip_constraints);
+    print_bool("skip-indexes",skip_indexes);
     print_bool("skip-post",skip_post);
     print_bool("no-data",no_data);
 
@@ -449,6 +453,7 @@ int main(int argc, char *argv[]) {
       m_error("Disabling redologs is not supported for version %d.%d.%d", get_major(), get_secondary(), get_revision());
     }
   }
+
   // To here.
   conf.database_queue = g_async_queue_new();
   conf.table_queue = g_async_queue_new();
@@ -475,7 +480,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  initialize_connection_pool();
+  initialize_connection_pool(conn);
   struct thread_data *t=g_new(struct thread_data,1);
   initialize_thread_data(t, &conf, WAITING, 0, NULL);
 //  t.connection_data.thrconn = conn;
@@ -520,24 +525,28 @@ int main(int argc, char *argv[]) {
 
   wait_schema_worker_to_finish();
   wait_loader_threads_to_finish();
+  wait_control_job();
   create_index_shutdown_job(&conf);
   wait_index_worker_to_finish();
   initialize_post_loding_threads(&conf);
   create_post_shutdown_job(&conf);
   wait_post_worker_to_finish();
-  wait_control_job();
+//  wait_control_job();
   g_async_queue_unref(conf.ready);
   conf.ready=NULL;
-
-  if (disable_redo_log)
-    m_query(conn, "ALTER INSTANCE ENABLE INNODB REDO_LOG", m_critical, "ENABLE INNODB REDO LOG failed");
-
   g_async_queue_unref(conf.data_queue);
   conf.data_queue=NULL;
 
+  struct connection_data *cd=close_restore_thread(TRUE);
+  g_mutex_lock(cd->in_use);
+
+  if (disable_redo_log)
+    m_query(cd->thrconn, "ALTER INSTANCE ENABLE INNODB REDO_LOG", m_critical, "ENABLE INNODB REDO LOG failed");
+
   gboolean checksum_ok=TRUE;
+  tl=conf.table_list;
   while (tl != NULL){
-    checksum_ok&=checksum_dbt(tl->data, conn);
+    checksum_ok&=checksum_dbt(tl->data, cd->thrconn);
     tl=tl->next;
   }
 
@@ -552,16 +561,20 @@ int main(int argc, char *argv[]) {
     struct database *d= NULL;
     while (g_hash_table_iter_next(&iter, (gpointer *) &lkey, (gpointer *) &d)) {
       if (d->schema_checksum != NULL && !no_schemas)
-        checksum_ok&=checksum_database_template(d->real_database, d->schema_checksum,  conn,
+        checksum_ok&=checksum_database_template(d->real_database, d->schema_checksum,  cd->thrconn,
                                   "Schema create checksum", checksum_database_defaults);
       if (d->post_checksum != NULL && !skip_post)
-        checksum_ok&=checksum_database_template(d->real_database, d->post_checksum,  conn,
+        checksum_ok&=checksum_database_template(d->real_database, d->post_checksum,  cd->thrconn,
                                   "Post checksum", checksum_process_structure);
       if (d->triggers_checksum != NULL && !skip_triggers)
-        checksum_ok&=checksum_database_template(d->real_database, d->triggers_checksum,  conn,
+        checksum_ok&=checksum_database_template(d->real_database, d->triggers_checksum,  cd->thrconn,
                                   "Triggers checksum", checksum_trigger_structure_from_database);
     }
   }
+  guint i=0;
+  for(i=1;i<num_threads;i++)
+    close_restore_thread(FALSE);
+  wait_restore_threads_to_close();
 
   if (!checksum_ok)
     g_error("Checksum failed");
@@ -574,13 +587,12 @@ int main(int argc, char *argv[]) {
   }
 
   if (change_master_statement != NULL ){
-    int i=0;
     gchar** line=g_strsplit(change_master_statement->str, ";\n", -1);
-    for (i=0; i < (int)g_strv_length(line);i++){
+    for (i=0; i < g_strv_length(line);i++){
        if (strlen(line[i])>2){
          GString *str=g_string_new(line[i]);
          g_string_append_c(str,';');
-         m_query(conn, str->str, m_warning, "Sending CHANGE MASTER: %s", str->str);
+         m_query(cd->thrconn, str->str, m_warning, "Sending CHANGE MASTER: %s", str->str);
          g_string_free(str,TRUE);
        }
     }
@@ -596,8 +608,8 @@ int main(int argc, char *argv[]) {
   free_hash(set_session_hash);
   g_hash_table_remove_all(set_session_hash);
   g_hash_table_unref(set_session_hash);
-  execute_gstring(conn, set_global_back);
-  mysql_close(conn);
+  execute_gstring(cd->thrconn, set_global_back);
+  mysql_close(cd->thrconn);
   mysql_thread_end();
   mysql_library_end();
   g_free(directory);

@@ -30,7 +30,7 @@
 #include <strings.h>
 
 extern gboolean enable_binlog;
-
+extern gboolean show_warnings;
 gchar *innodb_optimize_keys_str=NULL;
 gchar *checksum_str=NULL;
 
@@ -99,7 +99,8 @@ static GOptionEntry entries[] = {
       "Identifier quote character used in INSERT statements. "
       "Posible values are: BACKTICK, bt, ` for backtick and DOUBLE_QUOTE, dt, \" for double quote. "
       "Default: detect from dump if possible, otherwise BACKTICK", NULL},
-
+    {"show-warnings", 0,0, G_OPTION_ARG_NONE, &show_warnings, 
+      "If enabled, during INSERT IGNORE the warnings will be printed", NULL},
     {"resume",0, 0, G_OPTION_ARG_NONE, &resume,
       "Expect to find resume file in backup dir and will only process those files",NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
@@ -145,6 +146,11 @@ static GOptionEntry execution_entries[] = {
      "It will receive the stream from STDIN and creates the file in the disk before start processing. Since v0.12.7-1, accepts NO_DELETE, NO_STREAM_AND_NO_DELETE and TRADITIONAL which is the default value and used if no parameter is given", NULL},
 //    {"no-delete", 0, 0, G_OPTION_ARG_NONE, &no_delete,
 //      "It will not delete the files after stream has been completed", NULL},
+    {"ignore-errors", 0, 0, G_OPTION_ARG_STRING, &ignore_errors,
+     "Not increment error count and Warning instead of Critical in case of "
+     "any of the comman separated error number list",
+     NULL},
+
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
 
 static GOptionEntry pmm_entries[] = {
@@ -162,6 +168,10 @@ static GOptionEntry filter_entries[] ={
      NULL},
     {"skip-post", 0, 0, G_OPTION_ARG_NONE, &skip_post,
      "Do not import events, stored procedures and functions. By default, it imports events, stored procedures or functions", NULL},
+    {"skip-constraints", 0, 0, G_OPTION_ARG_NONE, &skip_constraints, "Do not import constraints. By default, it imports contraints",
+     NULL },
+    {"skip-indexes", 0, 0, G_OPTION_ARG_NONE, &skip_indexes, "Do not import secondary index on InnoDB tables. By default, it import the indexes",
+     NULL},
     {"no-data", 0, 0, G_OPTION_ARG_NONE, &no_data, "Do not dump or import table data",
      NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};

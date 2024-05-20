@@ -73,6 +73,8 @@ extern gboolean routine_checksums;
 extern gboolean schema_checksums;
 extern gboolean shutdown_triggered;
 extern gboolean skip_definer;
+extern gboolean skip_constraints;
+extern gboolean skip_indexes;
 extern gboolean stream;
 extern gboolean success_on_1146;
 extern gboolean use_fifo;
@@ -140,4 +142,4 @@ extern guint64 min_chunk_step_size;
 extern guint64 max_chunk_step_size;
 extern gboolean compact;
 extern gchar *fifo_directory;
-
+extern gboolean split_integer_tables;

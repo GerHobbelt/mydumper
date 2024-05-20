@@ -249,9 +249,25 @@ void write_table_definition_into_file(MYSQL *conn, struct db_table *dbt,
     g_free(create_table);
   }
   g_string_append(statement, ";\n");
-  if (!write_data(outfile, statement)) {
-    g_critical("Could not write schema for %s.%s", dbt->database->name, dbt->table);
-    errors++;
+
+  if (skip_indexes || skip_constraints){
+    GString *alter_table_statement=g_string_sized_new(statement_size);
+    GString *alter_table_constraint_statement=g_string_sized_new(statement_size);
+    GString *create_table_statement=g_string_sized_new(statement_size);
+    global_process_create_table_statement(statement->str, create_table_statement, alter_table_statement, alter_table_constraint_statement, dbt->table, TRUE);
+    if (!write_data(outfile, create_table_statement)) {
+      g_critical("Could not write schema for %s.%s", dbt->database->name, dbt->table);
+      errors++;
+    }
+    if (!skip_indexes)
+      write_data(outfile, alter_table_statement );
+    if (!skip_constraints)
+      write_data(outfile, alter_table_constraint_statement);
+  }else{
+    if (!write_data(outfile, statement)) {
+      g_critical("Could not write schema for %s.%s", dbt->database->name, dbt->table);
+      errors++;
+    }
   }
   g_free(query);
   m_close(0, outfile, filename, 1, dbt);
@@ -928,6 +944,21 @@ void do_JOB_CHECKSUM(struct thread_data *td, struct job *job){
   }
   free_table_checksum_job(tcj);
   g_free(job);
+}
+
+
+void create_job_to_dump_table(struct configuration *conf, gboolean is_view, gboolean is_sequence, struct database *database, gchar *table, gchar *collation, gchar *engine){
+  struct job *j = g_new0(struct job, 1);
+  struct dump_table_job *dtj= g_new0(struct dump_table_job, 1);
+  dtj->is_view=is_view;
+  dtj->is_sequence=is_sequence;
+  dtj->database=database;
+  dtj->table=table;
+  dtj->collation=collation;
+  dtj->engine=engine;
+  j->job_data = dtj;
+  j->type = JOB_TABLE;
+  g_async_queue_push(conf->initial_queue, j);
 }
 
 void create_job_to_dump_metadata(struct configuration *conf, FILE *mdfile){

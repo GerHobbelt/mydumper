@@ -230,7 +230,7 @@ void execute_use_if_needs_to(struct connection_data *cd, struct database *databa
     if (cd->current_database==NULL || g_strcmp0(database->real_database, cd->current_database->real_database) != 0){
       cd->current_database=database;
       if (execute_use(cd)){
-        m_critical("Thread %d: Error switching to database `%s` %s", cd->thread_id, cd->current_database->real_database, msg);
+        m_critical("Thread %d: Error switching to database `%s` %s: %s", cd->thread_id, cd->current_database->real_database, msg, mysql_error(cd->thrconn));
       }
     }
   }
@@ -239,12 +239,14 @@ void execute_use_if_needs_to(struct connection_data *cd, struct database *databa
 
 gboolean m_query(  MYSQL *conn, const gchar *query, void log_fun(const char *, ...) , const char *fmt, ...){
   if (mysql_query(conn, query)){
-    va_list    args;
-    va_start(args, fmt);
-    gchar *c=g_strdup_vprintf(fmt,args);
-    log_fun("%s: %s",c, mysql_error(conn));
-    g_free(c);
-    return FALSE;
+    if(!g_list_find(ignore_errors_list, GINT_TO_POINTER(mysql_errno(conn) ))){
+      va_list    args;
+      va_start(args, fmt);
+      gchar *c=g_strdup_vprintf(fmt,args);
+      log_fun("%s - ERROR %d: %s",c, mysql_errno(conn), mysql_error(conn));
+      g_free(c);
+      return FALSE;
+    }
   }
   return TRUE;
 }
@@ -317,6 +319,7 @@ void get_database_table_from_file(const gchar *filename,const char *sufix,gchar 
   g_strfreev(split);
 }
 
+/*
 void append_alter_table(GString * alter_table_statement, char *table){
   g_string_append(alter_table_statement,"ALTER TABLE `");
   g_string_append(alter_table_statement,table);
@@ -331,9 +334,11 @@ void finish_alter_table(GString * alter_table_statement){
   }else
     g_string_append(alter_table_statement,";\n");
 }
-
+*/
 int process_create_table_statement (gchar * statement, GString *create_table_statement, GString *alter_table_statement, GString *alter_table_constraint_statement, struct db_table *dbt, gboolean split_indexes){
-  int flag=0;
+  return global_process_create_table_statement(statement, create_table_statement, alter_table_statement, alter_table_constraint_statement, dbt->real_table, split_indexes);
+}
+/*  int flag=0;
   gchar** split_file= g_strsplit(statement, "\n", -1);
   gchar *autoinc_column=NULL;
   append_alter_table(alter_table_statement, dbt->real_table);
@@ -380,6 +385,7 @@ int process_create_table_statement (gchar * statement, GString *create_table_sta
   }
   return flag;
 }
+*/
 
 gchar *build_dbt_key(gchar *a, gchar *b){
   return g_strdup_printf("`%s`_`%s`", a, b);

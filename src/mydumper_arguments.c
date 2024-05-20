@@ -27,7 +27,7 @@
 #include "regex.h"
 #include "mydumper_arguments.h"
 const gchar *compress_method=NULL;
-
+gboolean split_integer_tables=FALSE;
 gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointer data, GError **error){
   *error=NULL;
   (void) data;
@@ -40,6 +40,15 @@ gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointe
       compress_method=ZSTD;
       return TRUE;
     }
+  }
+  if (g_strstr_len(option_name,6,"--rows") || g_strstr_len(option_name,2,"-r")){
+    split_integer_tables=TRUE;
+    if (value==NULL){
+      rows_per_chunk=g_strdup("0:0:0");
+      return TRUE;
+    }
+    rows_per_chunk=g_strdup(value);
+    return TRUE;
   }
   return FALSE;
 }
@@ -163,7 +172,7 @@ static GOptionEntry chunks_entries[] = {
      "Defines the amount of characters to use when the primary key is a string",NULL},
     {"char-chunk", 0, 0, G_OPTION_ARG_INT64, &char_chunk,
      "Defines in how many pieces should split the table. By default we use the amount of threads",NULL},
-    {"rows", 'r', 0, G_OPTION_ARG_STRING, &rows_per_chunk,
+    {"rows", 'r', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK, &arguments_callback,
      "Spliting tables into chunks of this many rows. It can be MIN:START_AT:MAX. MAX can be 0 which means that there is no limit. It will double the chunk size if query takes less than 1 second and half of the size if it is more than 2 seconds",
      NULL},
     { "split-partitions", 0, 0, G_OPTION_ARG_NONE, &split_partitions,
@@ -208,6 +217,10 @@ static GOptionEntry objects_entries[] = {
     {"events", 'E', 0, G_OPTION_ARG_NONE, &dump_events, "Dump events. By default, it do not dump events", NULL},
     {"routines", 'R', 0, G_OPTION_ARG_NONE, &dump_routines,
      "Dump stored procedures and functions. By default, it do not dump stored procedures nor functions", NULL},
+    {"skip-constraints", 0, 0, G_OPTION_ARG_NONE, &skip_constraints, "Remove the constraints from the CREATE TABLE statement. By default, the statement is not modified",
+     NULL },
+    {"skip-indexes", 0, 0, G_OPTION_ARG_NONE, &skip_indexes, "Remove the indexes from the CREATE TABLE statement. By default, the statement is not modified",
+     NULL},
     {"views-as-tables", 0, 0, G_OPTION_ARG_NONE, &views_as_tables, "Export VIEWs as they were tables",
      NULL},
     {"no-views", 'W', 0, G_OPTION_ARG_NONE, &no_dump_views, "Do not dump VIEWs",

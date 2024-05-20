@@ -20,17 +20,25 @@
 #include <pcre.h>
 #include "common_options.h"
 #define MYLOADER_MODE "myloader_mode"
+#define IS_INNODB_TABLE 2
+#define INCLUDE_CONSTRAINT 4
+#define IS_ALTER_TABLE_PRESENT 8
 
 #define START_SLAVE "START SLAVE"
 #define START_SLAVE_SQL_THREAD "START SLAVE SQL_THREAD"
 #define STOP_SLAVE_SQL_THREAD "STOP SLAVE SQL_THREAD"
 #define STOP_SLAVE "STOP SLAVE"
 #define RESET_SLAVE "RESET SLAVE"
+#define SHOW_SLAVE_STATUS "SHOW SLAVE STATUS"
+#define SHOW_ALL_SLAVES_STATUS "SHOW ALL SLAVES STATUS"
 #define START_REPLICA "START REPLICA"
 #define START_REPLICA_SQL_THREAD "START REPLICA SQL_THREAD"
 #define STOP_REPLICA "STOP REPLICA"
 #define STOP_REPLICA_SQL_THREAD "STOP REPLICA SQL_THREAD"
 #define RESET_REPLICA "RESET REPLICA"
+#define SHOW_REPLICA_STATUS "SHOW REPLICA STATUS"
+#define SHOW_ALL_REPLICAS_STATUS "SHOW ALL REPLICAS STATUS"
+
 
 #define ZSTD_EXTENSION ".zst"
 #define GZIP_EXTENSION ".gz"
@@ -44,6 +52,8 @@ extern const gchar *stop_replica;
 extern const gchar *start_replica_sql_thread;
 extern const gchar *stop_replica_sql_thread;
 extern const gchar *reset_replica;
+extern const gchar *show_replica_status;
+extern const gchar *show_all_replicas_status;
 
 #ifndef _src_common_h
 #define _src_common_h
@@ -165,3 +175,5 @@ g_string_replace (GString     *string,
 #if !GLIB_CHECK_VERSION(2, 36, 0)
 extern guint g_get_num_processors (void);
 #endif
+char *show_warnings_if_possible(MYSQL *conn);
+int global_process_create_table_statement (gchar * statement, GString *create_table_statement, GString *alter_table_statement, GString *alter_table_constraint_statement, gchar *real_table, gboolean split_indexes);
