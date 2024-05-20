@@ -111,6 +111,7 @@ static GOptionEntry lock_entries[] = {
      "Minimize locking time on InnoDB tables.", NULL},
     {"trx-consistency-only", 0, 0, G_OPTION_ARG_NONE, &trx_consistency_only,
      "Transactional consistency only", NULL},
+    {"skip-ddl-locks", 0, 0, G_OPTION_ARG_NONE, &skip_ddl_locks, "Do not send DDL locks when possible", NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
 
 
@@ -219,6 +220,7 @@ static GOptionEntry statement_entries[] = {
      "Instead of creating INSERT INTO statements, it creates LOAD DATA statements and .dat files", NULL },
     { "csv", 0, 0, G_OPTION_ARG_NONE, &csv,
       "Automatically enables --load-data and set variables to export in CSV format.", NULL },
+    { "include-header", 0, 0, G_OPTION_ARG_NONE, &include_header, "When --load-data or --csv is used, it will include the header with the column name", NULL},
     {"fields-terminated-by", 0, 0, G_OPTION_ARG_STRING, &fields_terminated_by_ld,"Defines the character that is written between fields", NULL },
     {"fields-enclosed-by", 0, 0, G_OPTION_ARG_STRING, &fields_enclosed_by_ld,"Defines the character to enclose fields. Default: \"", NULL },
     {"fields-escaped-by", 0, 0, G_OPTION_ARG_STRING, &fields_escaped_by,

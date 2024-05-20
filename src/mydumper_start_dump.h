@@ -284,6 +284,8 @@ struct db_table {
   GString *select_fields;
   gboolean complete_insert;
   GString *insert_statement;
+  GString *load_data_header;
+  GString *load_data_suffix;
   gboolean is_innodb;
   gboolean is_sequence;
   gboolean has_json_fields;
@@ -358,5 +360,3 @@ gboolean sig_triggered_term(void * user_data);
 void set_disk_limits(guint p_at, guint r_at);
 void print_dbt_on_metadata(FILE *mdfile, struct db_table *dbt);
 void print_dbt_on_metadata_gstring(struct db_table *dbt, GString *data);
-int m_close_pipe(guint thread_id, int file, gchar *filename, guint64 size, struct db_table * dbt);
-int m_close_file(guint thread_id, int file, gchar *filename, guint64 size, struct db_table * dbt);

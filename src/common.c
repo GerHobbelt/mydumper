@@ -508,7 +508,8 @@ void create_backup_dir(char *new_directory, char *new_fifo_directory) {
       m_critical("Unable to create `%s': %s", new_directory, g_strerror(errno));
     }
   }
-  create_fifo_dir(new_fifo_directory);
+  if (new_fifo_directory)
+    create_fifo_dir(new_fifo_directory);
 }
 
 guint strcount(gchar *text){
@@ -538,13 +539,17 @@ gchar * remove_new_line(gchar *to){
   return to;
 }
 
-gboolean m_remove(gchar * directory, const gchar * filename){
-  if (stream && no_delete == FALSE){
+void m_remove0(gchar * directory, const gchar * filename){
     gchar *path = g_build_filename(directory == NULL?"":directory, filename, NULL);
     g_message("Removing file: %s", path);
     if (remove(path) < 0)
       g_warning("Remove failed: %s (%s)", path, strerror(errno));
     g_free(path);
+}
+
+gboolean m_remove(gchar * directory, const gchar * filename){
+  if (stream && no_delete == FALSE){
+    m_remove0(directory,filename);
   }
   return TRUE;
 }
@@ -622,7 +627,8 @@ void initialize_common_options(GOptionContext *context, const gchar *group){
     if (g_key_file_has_group(key_file, group )){
       parse_key_file_group(key_file, context, group);
       set_connection_defaults_file_and_group(defaults_file, group); 
-    }else if (g_key_file_has_group(key_file, "client" )){
+    }
+    if (g_key_file_has_group(key_file, "client" )){
       set_connection_defaults_file_and_group(defaults_file, NULL);
     }
   }else
@@ -644,7 +650,8 @@ void initialize_common_options(GOptionContext *context, const gchar *group){
       g_message("Parsing extra key file");
       parse_key_file_group(extra_key_file, context, group);
       set_connection_defaults_file_and_group(defaults_extra_file, group);
-    } else if (g_key_file_has_group(extra_key_file, "client" )){
+    } 
+    if (g_key_file_has_group(extra_key_file, "client" )){
       set_connection_defaults_file_and_group(defaults_extra_file, NULL);
     }
   }else
