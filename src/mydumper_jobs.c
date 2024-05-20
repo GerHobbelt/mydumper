@@ -171,7 +171,6 @@ void write_schema_definition_into_file(MYSQL *conn, struct database *database, c
     errors++;
   }
   g_free(query);
-
   m_close(0, outfile, filename, 1, NULL);
   g_string_free(statement, TRUE);
   if (result)
@@ -244,7 +243,6 @@ void write_table_definition_into_file(MYSQL *conn, struct db_table *dbt,
     errors++;
   }
   g_free(query);
-
   m_close(0, outfile, filename, 1, dbt);
   g_string_free(statement, TRUE);
   if (result)
@@ -530,7 +528,7 @@ void write_sequence_definition_into_file(MYSQL *conn, struct db_table *dbt, char
   }
 
   if (set_names_str) {
-    g_string_printf(statement,"%s;\n",set_names_str);
+    g_string_printf(statement, "%s;\n", set_names_statement);
   }
 
   if (!write_data(outfile, statement)) {

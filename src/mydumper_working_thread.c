@@ -97,10 +97,10 @@ gboolean views_as_tables=FALSE;
 gboolean no_dump_sequences = FALSE;
 gboolean success_on_1146 = FALSE;
 
-GList  *innodb_table = NULL;
-GMutex *innodb_table_mutex = NULL;
-GList  *non_innodb_table = NULL;
-GMutex *non_innodb_table_mutex = NULL;
+struct MList  *innodb_table = NULL;
+//GMutex *innodb_table_mutex = NULL;
+struct MList  *non_innodb_table = NULL;
+//GMutex *non_innodb_table_mutex = NULL;
 GMutex *table_schemas_mutex = NULL;
 GMutex *all_dbts_mutex=NULL;
 GMutex *trigger_schemas_mutex = NULL;
@@ -173,8 +173,13 @@ void initialize_working_thread(){
 
   character_set_hash=g_hash_table_new_full ( g_str_hash, g_str_equal, &g_free, &g_free);
   character_set_hash_mutex = g_mutex_new();
-  non_innodb_table_mutex = g_mutex_new();
-  innodb_table_mutex = g_mutex_new();
+  innodb_table=g_new(struct MList, 1);
+  non_innodb_table=g_new(struct MList, 1);
+  innodb_table->list=NULL;
+  non_innodb_table->list=NULL;
+  non_innodb_table->mutex = g_mutex_new();
+  innodb_table->mutex = g_mutex_new();
+
   view_schemas_mutex = g_mutex_new();
   table_schemas_mutex = g_mutex_new();
   trigger_schemas_mutex = g_mutex_new();
@@ -216,22 +221,18 @@ void initialize_working_thread(){
       m_critical("--compression and --exec-per-thread are not comptatible");
     }
     gchar *cmd=NULL;
-    initialize_gzip_cmd();
     if ( g_strcmp0(compress_method,GZIP)==0){
       if ((cmd=get_gzip_cmd()) == NULL){
         g_error("gzip command not found on any static location, use --exec-per-thread for non default locations");
       }
       exec_per_thread=g_strdup_printf("%s -c", cmd);
-      exec_per_thread_command=gzip_cmd;
       exec_per_thread_extension=GZIP_EXTENSION;
     }else{ 
-      initialize_zstd_cmd();
       if ( g_strcmp0(compress_method,ZSTD)==0){
       if ( (cmd=get_zstd_cmd()) == NULL ){
         g_error("zstd command not found on any static location, use --exec-per-thread for non default locations");
       }
       exec_per_thread=g_strdup_printf("%s -c", cmd);
-      exec_per_thread_command=zstd_cmd;
       exec_per_thread_extension=ZSTD_EXTENSION;
     }
     }
@@ -255,8 +256,8 @@ void initialize_working_thread(){
 void finalize_working_thread(){
   g_hash_table_destroy(character_set_hash);
   g_mutex_free(character_set_hash_mutex);
-  g_mutex_free(innodb_table_mutex);
-  g_mutex_free(non_innodb_table_mutex);
+//  g_mutex_free(innodb_table_mutex);
+//  g_mutex_free(non_innodb_table_mutex);
   g_mutex_free(view_schemas_mutex);
   g_mutex_free(table_schemas_mutex);
   g_mutex_free(trigger_schemas_mutex);
@@ -792,8 +793,8 @@ void process_queue(GAsyncQueue * queue, struct thread_data *td, gboolean (*p)(),
 }
 
 void build_lock_tables_statement(struct configuration *conf){
-  g_mutex_lock(non_innodb_table_mutex);
-  GList *iter = non_innodb_table;
+  g_mutex_lock(non_innodb_table->mutex);
+  GList *iter = non_innodb_table->list;
   struct db_table *dbt;
   if ( iter != NULL){
     dbt = (struct db_table *)iter->data;
@@ -807,7 +808,7 @@ void build_lock_tables_statement(struct configuration *conf){
                       dbt->database->name, dbt->table);
     }
   }
-  g_mutex_unlock(non_innodb_table_mutex);
+  g_mutex_unlock(non_innodb_table->mutex);
 }
 
 void update_estimated_remaining_chunks_on_dbt(struct db_table *dbt){
@@ -1139,80 +1140,91 @@ void get_primary_key_string_old(MYSQL *conn, struct db_table * dbt) {
 }
 */
 
-struct db_table *new_db_table( MYSQL *conn, struct configuration *conf, struct database *database, char *table, char *table_collation, char *datalength, guint64 rows_in_sts){
-  struct db_table *dbt = g_new(struct db_table, 1);
-  dbt->status = UNDEFINED;
-  dbt->database = database;
-  dbt->table = g_strdup(table);
-  dbt->table_filename = get_ref_table(dbt->table);
-  dbt->rows_in_sts = rows_in_sts;
-  dbt->character_set = table_collation==NULL? NULL:get_character_set_from_collation(conn, table_collation);
-  dbt->has_json_fields = has_json_fields(conn, dbt->database->name, dbt->table);
-  dbt->rows_lock= g_mutex_new();
-  dbt->escaped_table = escape_string(conn,dbt->table);
-  dbt->anonymized_function=get_anonymized_function_for(conn, dbt->database->name, dbt->table);
-  gchar * k = g_strdup_printf("`%s`.`%s`",dbt->database->name,dbt->table);
-  dbt->where=g_hash_table_lookup(conf_per_table.all_where_per_table, k);
-  dbt->limit=g_hash_table_lookup(conf_per_table.all_limit_per_table, k);
-  dbt->columns_on_select=g_hash_table_lookup(conf_per_table.all_columns_on_select_per_table, k);
-  dbt->columns_on_insert=g_hash_table_lookup(conf_per_table.all_columns_on_insert_per_table, k);
-  dbt->partition_regex=g_hash_table_lookup(conf_per_table.all_partition_regex_per_table, k);
-  gchar *rows_p_chunk=g_hash_table_lookup(conf_per_table.all_rows_per_table, k);
-  if (rows_p_chunk )
-    parse_rows_per_chunk(rows_p_chunk, &(dbt->min_chunk_step_size), &(dbt->starting_chunk_step_size), &(dbt->max_chunk_step_size));
-  else{
-    dbt->min_chunk_step_size=min_chunk_step_size;
-    dbt->starting_chunk_step_size=rows_per_file;
-    dbt->max_chunk_step_size=max_chunk_step_size;
-  }
-  if (dbt->min_chunk_step_size == 1 && dbt->min_chunk_step_size == dbt->starting_chunk_step_size && dbt->starting_chunk_step_size != dbt->max_chunk_step_size ){
-    dbt->min_chunk_step_size = 2;
-    dbt->starting_chunk_step_size = 2;
-    g_warning("Setting min and start rows per file to 2 on %s", k);
-  }
-  dbt->num_threads=g_hash_table_lookup(conf_per_table.all_num_threads_per_table, k)?strtoul(g_hash_table_lookup(conf_per_table.all_num_threads_per_table, k), NULL, 10):num_threads;
-  dbt->estimated_remaining_steps=1;
-  dbt->min=NULL;
-  dbt->max=NULL;
+gboolean new_db_table( struct db_table **d, MYSQL *conn, struct configuration *conf, struct database *database, char *table, char *table_collation, char *datalength, guint64 rows_in_sts){
+  gchar * lkey = g_strdup_printf("`%s`.`%s`",database->name,table);
+  g_mutex_lock(all_dbts_mutex);
+  struct db_table *dbt = g_hash_table_lookup(all_dbts, lkey);
+  gboolean b;
+  if (dbt){
+    g_free(lkey);
+    b=FALSE;
+  }else{
+    dbt = g_new(struct db_table, 1);
+    dbt->status = UNDEFINED;
+    dbt->database = database;
+    dbt->table = g_strdup(table);
+    dbt->table_filename = get_ref_table(dbt->table);
+    dbt->rows_in_sts = rows_in_sts;
+    dbt->character_set = table_collation==NULL? NULL:get_character_set_from_collation(conn, table_collation);
+    dbt->has_json_fields = has_json_fields(conn, dbt->database->name, dbt->table);
+    dbt->rows_lock= g_mutex_new();
+    dbt->escaped_table = escape_string(conn,dbt->table);
+    dbt->anonymized_function=get_anonymized_function_for(conn, dbt->database->name, dbt->table);
+    dbt->where=g_hash_table_lookup(conf_per_table.all_where_per_table, lkey);
+    dbt->limit=g_hash_table_lookup(conf_per_table.all_limit_per_table, lkey);
+    dbt->columns_on_select=g_hash_table_lookup(conf_per_table.all_columns_on_select_per_table, lkey);
+    dbt->columns_on_insert=g_hash_table_lookup(conf_per_table.all_columns_on_insert_per_table, lkey);
+    dbt->partition_regex=g_hash_table_lookup(conf_per_table.all_partition_regex_per_table, lkey);
+    gchar *rows_p_chunk=g_hash_table_lookup(conf_per_table.all_rows_per_table, lkey);
+    if (rows_p_chunk )
+      parse_rows_per_chunk(rows_p_chunk, &(dbt->min_chunk_step_size), &(dbt->starting_chunk_step_size), &(dbt->max_chunk_step_size));
+    else{
+      dbt->min_chunk_step_size=min_chunk_step_size;
+      dbt->starting_chunk_step_size=rows_per_file;
+      dbt->max_chunk_step_size=max_chunk_step_size;
+    }
+    if (dbt->min_chunk_step_size == 1 && dbt->min_chunk_step_size == dbt->starting_chunk_step_size && dbt->starting_chunk_step_size != dbt->max_chunk_step_size ){
+      dbt->min_chunk_step_size = 2;
+      dbt->starting_chunk_step_size = 2;
+      g_warning("Setting min and start rows per file to 2 on %s", lkey);
+    }
+    dbt->num_threads=g_hash_table_lookup(conf_per_table.all_num_threads_per_table, lkey)?strtoul(g_hash_table_lookup(conf_per_table.all_num_threads_per_table, lkey), NULL, 10):num_threads;
+    dbt->estimated_remaining_steps=1;
+    dbt->min=NULL;
+    dbt->max=NULL;
 //  dbt->chunk_type_item.chunk_type = UNDEFINED;
 //  dbt->chunk_type_item.chunk_step = NULL;
-  dbt->chunks=NULL;
+    dbt->chunks=NULL;
 //  dbt->initial_chunk_step=NULL;
-  dbt->insert_statement=NULL;
-  dbt->chunks_mutex=g_mutex_new();
+    dbt->insert_statement=NULL;
+    dbt->chunks_mutex=g_mutex_new();
 //  g_mutex_lock(dbt->chunks_mutex);
-  dbt->chunks_queue=g_async_queue_new();
-  dbt->chunks_completed=g_new(int,1);
-  *(dbt->chunks_completed)=0;
-  get_primary_key(conn,dbt,conf);
-  dbt->primary_key_separated_by_comma = NULL;
-  if (order_by_primary_key)
-    get_primary_key_separated_by_comma(dbt);
-  dbt->multicolumn = g_list_length(dbt->primary_key) > 1;
+    dbt->chunks_queue=g_async_queue_new();
+    dbt->chunks_completed=g_new(int,1);
+    *(dbt->chunks_completed)=0;
+    get_primary_key(conn,dbt,conf);
+    dbt->primary_key_separated_by_comma = NULL;
+    if (order_by_primary_key)
+      get_primary_key_separated_by_comma(dbt);
+    dbt->multicolumn = g_list_length(dbt->primary_key) > 1;
 
 //  dbt->primary_key = get_primary_key_string(conn, dbt->database->name, dbt->table);
-  dbt->chunk_filesize=chunk_filesize;
+    dbt->chunk_filesize=chunk_filesize;
 //  create_job_to_determine_chunk_type(dbt, g_async_queue_push, );
 
-  g_free(k);
-  dbt->complete_insert = complete_insert || detect_generated_fields(conn, dbt->database->escaped, dbt->escaped_table);
-  if (dbt->complete_insert) {
-    dbt->select_fields = get_insertable_fields(conn, dbt->database->escaped, dbt->escaped_table);
-  } else {
-    dbt->select_fields = g_string_new("*");
-  }
-  dbt->indexes_checksum=NULL;
-  dbt->data_checksum=NULL;
-  dbt->schema_checksum=NULL;
-  dbt->triggers_checksum=NULL;
-  dbt->rows=0;
-  if (!datalength)
-    dbt->datalength = 0;
-  else
-    dbt->datalength = g_ascii_strtoull(datalength, NULL, 10);
+    dbt->complete_insert = complete_insert || detect_generated_fields(conn, dbt->database->escaped, dbt->escaped_table);
+    if (dbt->complete_insert) {
+      dbt->select_fields = get_insertable_fields(conn, dbt->database->escaped, dbt->escaped_table);
+    } else {
+      dbt->select_fields = g_string_new("*");
+    }
+    dbt->indexes_checksum=NULL;
+    dbt->data_checksum=NULL;
+    dbt->schema_checksum=NULL;
+    dbt->triggers_checksum=NULL;
+    dbt->rows=0;
+    if (!datalength)
+      dbt->datalength = 0;
+    else
+      dbt->datalength = g_ascii_strtoull(datalength, NULL, 10);
 
  // dbt->chunk_functions.process=NULL;
-  return dbt; 
+    g_hash_table_insert(all_dbts, lkey, dbt);
+    b=TRUE;
+  }
+  g_mutex_unlock(all_dbts_mutex);
+  *d=dbt;
+  return b; 
 }
 
 void free_db_table(struct db_table * dbt){
@@ -1267,11 +1279,9 @@ void new_table_to_dump(MYSQL *conn, struct configuration *conf, gboolean is_view
   }
   g_mutex_unlock(database->ad_mutex);
 
-  struct db_table *dbt = new_db_table( conn, conf, database, table, collation, datalength, rows_in_sts);
-  g_mutex_lock(all_dbts_mutex);
-  all_dbts=g_list_prepend( all_dbts, dbt) ;
-  g_mutex_unlock(all_dbts_mutex);
-
+  struct db_table *dbt=NULL;
+  gboolean b=new_db_table(&dbt, conn, conf, database, table, collation, datalength, rows_in_sts);
+  if (b){
   // if a view or sequence we care only about schema
   if ((!is_view || views_as_tables ) && !is_sequence) {
   // with trx_consistency_only we dump all as innodb_table
@@ -1293,22 +1303,22 @@ void new_table_to_dump(MYSQL *conn, struct configuration *conf, gboolean is_view
         if (trx_consistency_only ||
           (ecol != NULL && (!g_ascii_strcasecmp("InnoDB", ecol) || !g_ascii_strcasecmp("TokuDB", ecol)))) {
           dbt->is_innodb=TRUE;
-          g_mutex_lock(innodb_table_mutex);
-          innodb_table=g_list_prepend(innodb_table,dbt);
-          g_mutex_unlock(innodb_table_mutex);
+          g_mutex_lock(innodb_table->mutex);
+          innodb_table->list=g_list_prepend(innodb_table->list,dbt);
+          g_mutex_unlock(innodb_table->mutex);
 
         } else {
           dbt->is_innodb=FALSE;
-          g_mutex_lock(non_innodb_table_mutex);
-          non_innodb_table = g_list_prepend(non_innodb_table, dbt);
-          g_mutex_unlock(non_innodb_table_mutex);
+          g_mutex_lock(non_innodb_table->mutex);
+          non_innodb_table->list = g_list_prepend(non_innodb_table->list, dbt);
+          g_mutex_unlock(non_innodb_table->mutex);
         }
       }else{
         if (is_view){
           dbt->is_innodb=FALSE;
-          g_mutex_lock(non_innodb_table_mutex);
-          non_innodb_table = g_list_prepend(non_innodb_table, dbt);
-          g_mutex_unlock(non_innodb_table_mutex);
+          g_mutex_lock(non_innodb_table->mutex);
+          non_innodb_table->list = g_list_prepend(non_innodb_table->list, dbt);
+          g_mutex_unlock(non_innodb_table->mutex);
         }
       }
     }
@@ -1320,6 +1330,7 @@ void new_table_to_dump(MYSQL *conn, struct configuration *conf, gboolean is_view
     if (!no_schemas) {
       create_job_to_dump_sequence(dbt, conf);
     }
+  }
   }
 }
 
@@ -1502,16 +1513,7 @@ void dump_database_thread(MYSQL *conn, struct configuration *conf, struct databa
 
     /* In case of table-list option is enabled, check if table is part of the
      * list */
-    if (tables) {
-/*      int table_found = 0;
-      for (i = 0; tables[i] != NULL; i++)
-        if (g_ascii_strcasecmp(tables[i], row[0]) == 0)
-          table_found = 1;
-*/
-      if (!is_table_in_list(row[0], tables))
-        dump = 0;
-    }
-    if (!dump)
+    if (tables && !is_table_in_list(database->name, row[0], tables))
       continue;
 
     /* Special tables */

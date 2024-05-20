@@ -386,7 +386,6 @@ int main(int argc, char *argv[]) {
   conf.stream_queue = g_async_queue_new();
   conf.table_hash = g_hash_table_new ( g_str_hash, g_str_equal );
   conf.table_hash_mutex=g_mutex_new();
-  db_hash=g_hash_table_new_full ( g_str_hash, g_str_equal, g_free, g_free );
 
   if (g_file_test("resume",G_FILE_TEST_EXISTS)){
     if (!resume){
@@ -405,15 +404,13 @@ int main(int argc, char *argv[]) {
   t.current_database=NULL;
   t.status=WAITING;
 
+  if (database_db){
+    create_database(&t, database_db->real_database);
+    database_db->schema_state=CREATED;
+  }
+
   if (tables_list)
     tables = get_table_list(tables_list);
-
-  // Create database before the thread, to allow connection
-  if (db){
-    struct database * d=get_db_hash(g_strdup(db), g_strdup(db));
-    create_database(&t, db);
-    d->schema_state=CREATED;
-  }
 
   if (serial_tbl_creation)
     max_threads_for_schema_creation=1;
@@ -466,12 +463,12 @@ int main(int argc, char *argv[]) {
   g_hash_table_iter_init ( &iter, db_hash);
   struct database *d=NULL;
   while ( g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &d ) ) {
-    if (d->schema_checksum != NULL)
-      checksum_database_template(d->name, d->schema_checksum,  conn, "Schema create checksum", checksum_database_defaults);
-    if (d->post_checksum != NULL)
-      checksum_database_template(d->name, d->post_checksum,  conn, "Post checksum", checksum_process_structure);
-    if (d->triggers_checksum != NULL)
-      checksum_database_template(d->name, d->triggers_checksum,  conn, "Triggers checksum", checksum_trigger_structure_from_database);
+    if (d->schema_checksum != NULL && !no_schemas)
+      checksum_database_template(d->real_database, d->schema_checksum,  conn, "Schema create checksum", checksum_database_defaults);
+    if (d->post_checksum != NULL && !skip_post)
+      checksum_database_template(d->real_database, d->post_checksum,  conn, "Post checksum", checksum_process_structure);
+    if (d->triggers_checksum != NULL && !skip_triggers)
+      checksum_database_template(d->real_database, d->triggers_checksum,  conn, "Triggers checksum", checksum_trigger_structure_from_database);
   }
 
 

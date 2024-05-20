@@ -147,8 +147,10 @@ read_more:    buffer_len=read_stream_line(&(buffer[diff]),&eof,file,STREAM_BUFFE
             if (file){
               m_close(file);
             }
-            if (previous_filename)
+            if (previous_filename){
               intermediate_queue_new(previous_filename);
+	      previous_filename=NULL;
+	    }
             if (g_file_test(real_filename, G_FILE_TEST_EXISTS)){
               g_warning("Stream Thread: File %s exists in datadir, we are not replacing", real_filename);
               file = NULL;

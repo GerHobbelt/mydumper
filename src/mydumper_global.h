@@ -2,9 +2,10 @@
 #include <glib/gstdio.h>
 #include <gio/gio.h>
 #include <mysql.h>
+#include "mydumper_start_dump.h"
 extern gchar *defaults_file;
 extern char *defaults_extra_file;
-extern GList *all_dbts;
+extern GHashTable *all_dbts;
 extern GOptionEntry common_filter_entries[];
 extern GOptionEntry common_connection_entries[];
 extern GOptionEntry common_entries[];
@@ -91,7 +92,7 @@ extern gchar *where_option;
 extern GHashTable *all_where_per_table;
 extern gint database_counter;
 extern gint non_innodb_done;
-extern GList *innodb_table, *non_innodb_table;
+extern struct MList *innodb_table, *non_innodb_table;
 extern GMutex *innodb_table_mutex;
 extern GMutex *non_innodb_table_mutex;
 extern GList *no_updated_tables;

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 2.8.12)
 project(mydumper)
-set(VERSION 0.15.2-4)
+set(VERSION 0.15.2-6)
 set(ARCHIVE_NAME "${CMAKE_PROJECT_NAME}-${VERSION}")
 
 #Required packages
@@ -9,11 +9,11 @@ find_package(MySQL)
 find_package(ZLIB)
 find_package(GLIB2)
 find_package(PCRE)
-find_package(JeMalloc)
+# find_package(JeMalloc)
 
-if (NOT JEMALLOC_FOUND)
-    MESSAGE(WARNING "Could not find JeMalloc library")
-endif ()
+#if (NOT JEMALLOC_FOUND)
+#    MESSAGE(WARNING "Could not find JeMalloc library")
+#endif ()
 
 if (NOT MYSQL_FOUND)
     MESSAGE(FATAL_ERROR "Could not find MySQL or MariaDB client libraries")
@@ -78,7 +78,7 @@ add_executable(myloader ${MYLOADER_SRCS})
 
 if (NOT JEMALLOC_FOUND)
   target_link_libraries(mydumper ${MYSQL_LIBRARIES} ${GLIB2_LIBRARIES} ${GTHREAD2_LIBRARIES} ${GIO2_LIBRARIES} ${GOBJECT2_LIBRARIES} ${PCRE_PCRE_LIBRARY} ${ZLIB_LIBRARIES} stdc++ m )
-  target_link_libraries(myloader ${JEMALLOC_LIBRARIES} ${MYSQL_LIBRARIES} ${GLIB2_LIBRARIES} ${GTHREAD2_LIBRARIES} ${PCRE_PCRE_LIBRARY} ${ZLIB_LIBRARIES} stdc++)
+  target_link_libraries(myloader ${MYSQL_LIBRARIES} ${GLIB2_LIBRARIES} ${GTHREAD2_LIBRARIES} ${PCRE_PCRE_LIBRARY} ${ZLIB_LIBRARIES} stdc++)
 else ()
   target_link_libraries(mydumper ${JEMALLOC_LIBRARIES} ${MYSQL_LIBRARIES} ${GLIB2_LIBRARIES} ${GTHREAD2_LIBRARIES} ${GIO2_LIBRARIES} ${GOBJECT2_LIBRARIES} ${PCRE_PCRE_LIBRARY} ${ZLIB_LIBRARIES} stdc++ m )
   target_link_libraries(myloader ${JEMALLOC_LIBRARIES} ${MYSQL_LIBRARIES} ${GLIB2_LIBRARIES} ${GTHREAD2_LIBRARIES} ${PCRE_PCRE_LIBRARY} ${ZLIB_LIBRARIES} stdc++)

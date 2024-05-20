@@ -30,6 +30,8 @@ unsigned long long int total_data_sql_files = 0;
 #include "myloader_common.h"
 #include "myloader_control_job.h"
 #include "myloader_worker_loader.h"
+#include "myloader_worker_index.h"
+
 gboolean shutdown_triggered=FALSE;
 GAsyncQueue *file_list_to_do=NULL;
 static GMutex *progress_mutex = NULL;
@@ -206,19 +208,19 @@ void process_restore_job(struct thread_data *td, struct restore_job *rj){
   switch (rj->type) {
     case JOB_RESTORE_STRING:
       if (!source_db || g_strcmp0(dbt->database->name,source_db)==0){
-        get_total_done(td->conf, &total);
-        g_message("Thread %d: restoring %s `%s`.`%s` from %s. Tables %d of %d completed", td->thread_id, rj->data.srj->object,
-                  dbt->database->real_database, dbt->real_table, rj->filename, total , g_hash_table_size(td->conf->table_hash));
-        if (restore_data_in_gstring(td, rj->data.srj->statement, FALSE, &query_counter)){
-          increse_object_error(rj->data.srj->object);
-          g_message("Failed %s: %s",rj->data.srj->object,rj->data.srj->statement->str);
-        }
+          get_total_done(td->conf, &total);
+          g_message("Thread %d: restoring %s `%s`.`%s` from %s. Tables %d of %d completed", td->thread_id, rj->data.srj->object,
+                    dbt->database->real_database, dbt->real_table, rj->filename, total , g_hash_table_size(td->conf->table_hash));
+          if (restore_data_in_gstring(td, rj->data.srj->statement, FALSE, &query_counter)){
+            increse_object_error(rj->data.srj->object);
+            g_message("Failed %s: %s",rj->data.srj->object,rj->data.srj->statement->str);
+          }
       }
       free_schema_restore_job(rj->data.srj);
       break;
     case JOB_TO_CREATE_TABLE:
       dbt->schema_state=CREATING;
-      if (!source_db || g_strcmp0(dbt->database->name,source_db)==0){
+      if ((!source_db || g_strcmp0(dbt->database->name,source_db)==0) && !no_schemas){
         if (serial_tbl_creation) g_mutex_lock(single_threaded_create_table);
         g_message("Thread %d: restoring table `%s`.`%s` from %s", td->thread_id,
                 dbt->database->real_database, dbt->real_table, rj->filename);
@@ -247,27 +249,29 @@ void process_restore_job(struct thread_data *td, struct restore_job *rj){
       break;
     case JOB_RESTORE_FILENAME:
       if (!source_db || g_strcmp0(dbt->database->name,source_db)==0){
-        g_mutex_lock(progress_mutex);
-        progress++;
-        get_total_done(td->conf, &total);
-        g_message("Thread %d: restoring `%s`.`%s` part %d of %d from %s. Progress %llu of %llu. Tables %d of %d completed", td->thread_id,
-                  dbt->database->real_database, dbt->real_table, rj->data.drj->index, dbt->count, rj->filename, progress,total_data_sql_files, total , g_hash_table_size(td->conf->table_hash));
-        g_mutex_unlock(progress_mutex);
-        if (restore_data_from_file(td, dbt->database->real_database, dbt->real_table, rj->filename, FALSE) > 0){
-          g_atomic_int_inc(&(detailed_errors.data_errors));
-          g_critical("Thread %d: issue restoring %s: %s",td->thread_id,rj->filename, mysql_error(td->thrconn));
-        }
+          g_mutex_lock(progress_mutex);
+          progress++;
+          get_total_done(td->conf, &total);
+          g_message("Thread %d: restoring `%s`.`%s` part %d of %d from %s. Progress %llu of %llu. Tables %d of %d completed", td->thread_id,
+                    dbt->database->real_database, dbt->real_table, rj->data.drj->index, dbt->count, rj->filename, progress,total_data_sql_files, total , g_hash_table_size(td->conf->table_hash));
+          g_mutex_unlock(progress_mutex);
+          if (restore_data_from_file(td, dbt->database->real_database, dbt->real_table, rj->filename, FALSE) > 0){
+            g_atomic_int_inc(&(detailed_errors.data_errors));
+            g_critical("Thread %d: issue restoring %s: %s",td->thread_id,rj->filename, mysql_error(td->thrconn));
+          }
       }
       g_atomic_int_dec_and_test(&(dbt->remaining_jobs));
       g_free(rj->data.drj);
       break;
     case JOB_RESTORE_SCHEMA_FILENAME:
       if (!source_db || g_strcmp0(rj->data.srj->database->name,source_db)==0){
-        get_total_done(td->conf, &total); 
-        g_message("Thread %d: restoring %s on `%s` from %s. Tables %d of %d completed", td->thread_id, rj->data.srj->object,
-                  rj->data.srj->database->real_database, rj->filename, total , g_hash_table_size(td->conf->table_hash));
-        if ( restore_data_from_file(td, rj->data.srj->database->real_database, NULL, rj->filename, TRUE ) > 0 )
-          increse_object_error(rj->data.srj->object);
+        if ( g_strcmp0(rj->data.srj->object,VIEW) || !no_schemas){
+          get_total_done(td->conf, &total); 
+          g_message("Thread %d: restoring %s on `%s` from %s. Tables %d of %d completed", td->thread_id, rj->data.srj->object,
+                    rj->data.srj->database->real_database, rj->filename, total , g_hash_table_size(td->conf->table_hash));
+          if ( restore_data_from_file(td, rj->data.srj->database->real_database, NULL, rj->filename, TRUE ) > 0 )
+            increse_object_error(rj->data.srj->object);
+        }
       }
       free_schema_restore_job(rj->data.srj);
       break;
@@ -284,6 +288,7 @@ cleanup:
 GMutex **pause_mutex_per_thread=NULL;
 
 gboolean sig_triggered(void * user_data, int signal) {
+  struct configuration *conf=(struct configuration *)user_data;
   guint i=0;
   GAsyncQueue *queue=NULL;
   g_mutex_lock(shutdown_triggered_mutex);
@@ -296,9 +301,9 @@ gboolean sig_triggered(void * user_data, int signal) {
         pause_mutex_per_thread[i]=g_mutex_new();
       }
     }
-    if (((struct configuration *)user_data)->pause_resume == NULL)
-      ((struct configuration *)user_data)->pause_resume = g_async_queue_new();
-    queue = ((struct configuration *)user_data)->pause_resume;
+    if (conf->pause_resume == NULL)
+      conf->pause_resume = g_async_queue_new();
+    queue = conf->pause_resume;
     for(i=0;i<num_threads;i++){
       g_mutex_lock(pause_mutex_per_thread[i]);
       g_async_queue_push(queue,pause_mutex_per_thread[i]);
@@ -324,6 +329,7 @@ gboolean sig_triggered(void * user_data, int signal) {
     }
   }
   inform_restore_job_running();
+  create_index_shutdown_job(conf);
   g_message("Writing resume.partial file");
   gchar *filename;
   gchar *p=g_strdup("resume.partial"),*p2=g_strdup("resume");
