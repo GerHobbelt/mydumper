@@ -90,7 +90,6 @@ gchar *purge_mode_str=NULL;
 guint errors = 0;
 guint max_errors= 0;
 struct restore_errors detailed_errors = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-guint max_threads_per_table= G_MAXUINT;
 guint max_threads_for_schema_creation=4;
 guint max_threads_for_index_creation=4;
 guint max_threads_for_post_creation= 1;
@@ -109,18 +108,21 @@ extern gboolean shutdown_triggered;
 extern gboolean skip_definer;
 const char DIRECTORY[] = "import";
 
+
+GHashTable * set_session_hash=NULL;
+
 gchar *pmm_resolution = NULL;
 gchar *pmm_path = NULL;
 gboolean pmm = FALSE;
 
 GHashTable * myloader_initialize_hash_of_session_variables(){
-  GHashTable * set_session_hash=initialize_hash_of_session_variables();
+  GHashTable * _set_session_hash=initialize_hash_of_session_variables();
   if (!enable_binlog)
-    g_hash_table_insert(set_session_hash,g_strdup("SQL_LOG_BIN"),g_strdup("0"));
+    set_session_hash_insert(_set_session_hash,"SQL_LOG_BIN",g_strdup("0"));
   if (commit_count > 1)
-    g_hash_table_insert(set_session_hash,g_strdup("AUTOCOMMIT"),g_strdup("0"));
+    set_session_hash_insert(_set_session_hash,"AUTOCOMMIT",g_strdup("0"));
 
-  return set_session_hash;
+  return _set_session_hash;
 }
 
 
@@ -364,7 +366,7 @@ int main(int argc, char *argv[]) {
   set_global_back = g_string_new(NULL);
   detect_server_version(conn);
   detected_server = get_product();
-  GHashTable * set_session_hash = myloader_initialize_hash_of_session_variables();
+  set_session_hash = myloader_initialize_hash_of_session_variables();
   GHashTable * set_global_hash = g_hash_table_new ( g_str_hash, g_str_equal );
   if (key_file != NULL ){
     load_hash_of_all_variables_perproduct_from_key_file(key_file,set_global_hash,"myloader_global_variables");
@@ -470,11 +472,15 @@ int main(int argc, char *argv[]) {
   g_async_queue_unref(conf.data_queue);
   conf.data_queue=NULL;
 
+  gboolean checksum_ok=TRUE;
   GList * tl=conf.table_list;
   while (tl != NULL){
-    checksum_dbt(tl->data, conn);
+    checksum_ok&=checksum_dbt(tl->data, conn);
     tl=tl->next;
   }
+
+  if (!checksum_ok)
+    g_error("Checksum failed");
 
 
   if (checksum_mode != CHECKSUM_SKIP) {
@@ -484,17 +490,19 @@ int main(int argc, char *argv[]) {
     struct database *d= NULL;
     while (g_hash_table_iter_next(&iter, (gpointer *) &lkey, (gpointer *) &d)) {
       if (d->schema_checksum != NULL && !no_schemas)
-        checksum_database_template(d->real_database, d->schema_checksum,  conn,
+        checksum_ok&=checksum_database_template(d->real_database, d->schema_checksum,  conn,
                                   "Schema create checksum", checksum_database_defaults);
       if (d->post_checksum != NULL && !skip_post)
-        checksum_database_template(d->real_database, d->post_checksum,  conn,
+        checksum_ok&=checksum_database_template(d->real_database, d->post_checksum,  conn,
                                   "Post checksum", checksum_process_structure);
       if (d->triggers_checksum != NULL && !skip_triggers)
-        checksum_database_template(d->real_database, d->triggers_checksum,  conn,
+        checksum_ok&=checksum_database_template(d->real_database, d->triggers_checksum,  conn,
                                   "Triggers checksum", checksum_trigger_structure_from_database);
     }
   }
 
+  if (!checksum_ok)
+    g_error("Checksum failed");
 
   if (stream && no_delete == FALSE && input_directory == NULL){
     m_remove(directory,"metadata");

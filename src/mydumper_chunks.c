@@ -217,11 +217,9 @@ struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_tabl
       case MYSQL_TYPE_STRING:
       case MYSQL_TYPE_VAR_STRING:
 
-/*
         if (minmax)
           mysql_free_result(minmax);
         return new_none_chunk_step();
-*/
 
         csi=new_char_step_item(conn, TRUE, prefix, dbt->primary_key->data, 0, 0, row, lengths, NULL);
         if (minmax)
@@ -440,6 +438,12 @@ gboolean get_next_dbt_and_chunk_step_item(struct db_table **dbt,struct chunk_ste
         break;
       }
 //      get_next=d->initial_chunk_step->chunk_functions.get_next;
+
+      if (d->max_threads_per_table <= d->current_threads_running){
+        g_mutex_unlock(d->chunks_mutex);
+        goto next;
+      }
+      d->current_threads_running++;
 
       lcs=lcs->chunk_functions.get_next(d);
 

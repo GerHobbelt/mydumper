@@ -425,6 +425,8 @@ gchar * get_database_name_from_content(gchar *filename){
           real_database=g_strdup(create[1]);
           g_strfreev(create);
           break;
+        }else{
+          g_string_set_size(data,0);
         }
       }
     }
@@ -446,6 +448,8 @@ void process_database_filename(char * filename) {
   if (db_kname!=NULL){
     if (g_str_has_prefix(db_kname,"mydumper_"))
       db_vname=get_database_name_from_content(g_build_filename(directory,filename,NULL));
+    if(!db_vname)
+      m_critical("It was not possible to process db content in file: %s",filename);
   }else{
     m_critical("It was not possible to process db file: %s",filename);
   }
@@ -594,6 +598,9 @@ void process_metadata_global(const char *file)
       change_master(kf, group, change_master_statement);
     }else if (g_strstr_len(group,6,"master")){
       change_master(kf, group, change_master_statement);
+    }else if (g_strstr_len(group, 26,"myloader_session_variables")){
+      load_hash_of_all_variables_perproduct_from_key_file(kf,set_session_hash,"myloader_session_variables");
+      refresh_set_session_from_hash(set_session,set_session_hash);
     } else {
       trace("metadata: skipping group %s", group);
     }

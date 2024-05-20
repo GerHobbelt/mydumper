@@ -453,6 +453,9 @@ void thd_JOB_DUMP(struct thread_data *td, struct job *job){
 
 //  g_debug("chunk_type: %d %p", tj->dbt->chunk_type, tj->dbt->chunk_functions.process);
   tj->chunk_step_item->chunk_functions.process(tj, tj->chunk_step_item);
+  g_mutex_lock(tj->dbt->chunks_mutex);
+  tj->dbt->current_threads_running--;
+  g_mutex_unlock(tj->dbt->chunks_mutex);
 
 /*  if (use_savepoints &&
       mysql_query(td->thrconn, "ROLLBACK TO SAVEPOINT mydumper")) {
@@ -509,6 +512,8 @@ void initialize_consistent_snapshot(struct thread_data *td){
   if (g_strcmp0(td->binlog_snapshot_gtid_executed,"")==0){
     if (no_locks){
       g_warning("We are not able to determine if the backup will be consistent.");
+    }else{
+      it_is_a_consistent_backup=TRUE;
     }
   }else{
     if (cont){
@@ -554,26 +559,16 @@ void check_connection_status(struct thread_data *td){
 
 /* Write some stuff we know about snapshot, before it changes */
 void write_snapshot_info(MYSQL *conn, FILE *file) {
-  MYSQL_RES *master = NULL, *slave = NULL, *mdb = NULL;
-  MYSQL_FIELD *fields;
+  MYSQL_RES *master = NULL, *mdb = NULL;
   MYSQL_ROW row;
 
   char *masterlog = NULL;
   char *masterpos = NULL;
   char *mastergtid = NULL;
 
-  char *slavehost = NULL;
-  char *slavelog = NULL;
-  char *slavepos = NULL;
-  char *slavegtid = NULL;
-  char *channel_name = NULL;
-  const char *gtid_title = NULL;
-  guint isms;
-  guint i;
-
   
   if (mysql_query(conn, "SHOW MASTER STATUS"))
-    m_critical("Couldn't get master position: %s", mysql_error(conn));
+    m_warning("Couldn't get master position: %s", mysql_error(conn));
     
   master = mysql_store_result(conn);
   if (master && (row = mysql_fetch_row(master))) {
@@ -601,7 +596,30 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
     g_message("Written master status");
   }
 
-  isms = 0;
+  fflush(file);
+
+  if (master)
+    mysql_free_result(master);
+  if (mdb)
+    mysql_free_result(mdb);
+
+}
+/*
+void write_replica_info(MYSQL *conn, FILE *file) {
+  MYSQL_RES *slave = NULL;
+  MYSQL_FIELD *fields;
+  MYSQL_ROW row;
+
+  char *slavehost = NULL;
+  char *slavelog = NULL;
+  char *slavepos = NULL;
+  char *slavegtid = NULL;
+
+  char *channel_name = NULL;
+
+  const char *gtid_title = NULL;
+  guint i;
+  guint isms = 0;
   mysql_query(conn, "SELECT @@default_master_connection");
   MYSQL_RES *rest = mysql_store_result(conn);
   if (rest != NULL && mysql_num_rows(rest)) {
@@ -617,6 +635,19 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
 
   guint slave_count=0;
   slave = mysql_store_result(conn);
+
+  if (mysql_num_rows(slave) == 0){
+    goto cleanup;
+  }
+  mysql_free_result(slave);
+  mysql_query(conn, "STOP REPLICA SQL_THREAD");
+  if (isms)
+    mysql_query(conn, "SHOW ALL SLAVES STATUS");
+  else
+    mysql_query(conn, "SHOW SLAVE STATUS");
+
+  slave = mysql_store_result(conn);
+
   GString *replication_section_str = g_string_sized_new(100);
 
   while (slave && (row = mysql_fetch_row(slave))) {
@@ -664,17 +695,11 @@ void write_snapshot_info(MYSQL *conn, FILE *file) {
     g_warning("Multisource replication found. Do not trust in the exec_master_log_pos as it might cause data inconsistencies. Search 'Replication and Transaction Inconsistencies' on MySQL Documentation");
 
   fflush(file);
-  if (master)
-    mysql_free_result(master);
+cleanup:
   if (slave)
     mysql_free_result(slave);
-  if (mdb)
-    mysql_free_result(mdb);
-
-//    if (g_atomic_int_dec_and_test(&schema_counter)) {
-//      g_mutex_unlock(ready_schema_mutex);
-//    }
 }
+*/
 
 gboolean process_job_builder_job(struct thread_data *td, struct job *job){
     switch (job->type) {
@@ -1181,6 +1206,8 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
     dbt->columns_on_select=g_hash_table_lookup(conf_per_table.all_columns_on_select_per_table, lkey);
     dbt->columns_on_insert=g_hash_table_lookup(conf_per_table.all_columns_on_insert_per_table, lkey);
     dbt->partition_regex=g_hash_table_lookup(conf_per_table.all_partition_regex_per_table, lkey);
+    dbt->max_threads_per_table=max_threads_per_table;
+    dbt->current_threads_running=0;
     gchar *rows_p_chunk=g_hash_table_lookup(conf_per_table.all_rows_per_table, lkey);
     if (rows_p_chunk )
       parse_rows_per_chunk(rows_p_chunk, &(dbt->min_chunk_step_size), &(dbt->starting_chunk_step_size), &(dbt->max_chunk_step_size));

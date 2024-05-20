@@ -83,6 +83,7 @@ static GOptionEntry extra_entries[] = {
     {"order-by-primary", 0, 0, G_OPTION_ARG_NONE, &order_by_primary_key,
      "Sort the data by Primary Key or Unique key if no primary key exists",
      NULL},
+    {"compact", 0, 0, G_OPTION_ARG_NONE, &compact, "Give less verbose output. Disables header/footer constructs.", NULL},
     {"compress", 'c', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK , &arguments_callback,
      "Compress output files using: /usr/bin/gzip and /usr/bin/zstd. Options: GZIP and ZSTD. Default: GZIP", NULL},
     {"skip-defer", 0, 0, G_OPTION_ARG_NONE, &skip_defer,
@@ -155,6 +156,8 @@ static GOptionEntry daemon_entries[] = {
 
 
 static GOptionEntry chunks_entries[] = {
+    {"max-threads-per-table", 0, 0, G_OPTION_ARG_INT, &max_threads_per_table,
+     "Maximum number of threads per table to use", NULL},
     {"char-deep", 0, 0, G_OPTION_ARG_INT64, &char_deep,
      "Defines the amount of characters to use when the primary key is a string",NULL},
     {"char-chunk", 0, 0, G_OPTION_ARG_INT64, &char_chunk,
