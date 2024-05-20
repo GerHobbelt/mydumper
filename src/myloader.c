@@ -68,6 +68,7 @@ gchar *input_directory = NULL;
 gchar *directory = NULL;
 gchar *pwd=NULL;
 gboolean overwrite_tables = FALSE;
+gboolean overwrite_unsafe = FALSE;
 
 gboolean innodb_optimize_keys = FALSE;
 gboolean innodb_optimize_keys_per_table = FALSE;
@@ -75,6 +76,7 @@ gboolean innodb_optimize_keys_all_tables = FALSE;
 
 gboolean enable_binlog = FALSE;
 gboolean disable_redo_log = FALSE;
+enum checksum_modes checksum_mode= CHECKSUM_FAIL;
 gboolean skip_triggers = FALSE;
 gboolean skip_post = FALSE;
 gboolean serial_tbl_creation = FALSE;
@@ -88,11 +90,11 @@ gchar *purge_mode_str=NULL;
 guint errors = 0;
 guint max_errors= 0;
 struct restore_errors detailed_errors = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-guint max_threads_per_table=4;
-guint max_threads_per_table_hard=4;
+guint max_threads_per_table= G_MAXUINT;
 guint max_threads_for_schema_creation=4;
 guint max_threads_for_index_creation=4;
 guint max_threads_for_post_creation= 1;
+guint retry_count= 10;
 gboolean stream = FALSE;
 gboolean no_delete = FALSE;
 gboolean quote_character_cli= FALSE;
@@ -207,13 +209,14 @@ void print_errors(){
 }
 
 int main(int argc, char *argv[]) {
-  struct configuration conf = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0};
+  struct configuration conf = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0};
 
   GError *error = NULL;
   GOptionContext *context;
 
   setlocale(LC_ALL, "");
   g_thread_init(NULL);
+  set_thread_name("MNT");
 
   initialize_share_common();
   signal(SIGCHLD, SIG_IGN);
@@ -242,6 +245,16 @@ int main(int argc, char *argv[]) {
   } else {
     set_verbose(verbose);
   }
+
+  if (overwrite_unsafe)
+    overwrite_tables= TRUE;
+
+  check_num_threads();
+
+  if (num_threads > max_threads_per_table)
+    g_message("Using %u loader threads (%u per table)", num_threads, max_threads_per_table);
+  else
+    g_message("Using %u loader threads", num_threads);
 
   initialize_common_options(context, "myloader");
   g_option_context_free(context);
@@ -380,6 +393,7 @@ int main(int argc, char *argv[]) {
   // To here.
   conf.database_queue = g_async_queue_new();
   conf.table_queue = g_async_queue_new();
+  conf.retry_queue = g_async_queue_new();
   conf.data_queue = g_async_queue_new();
   conf.post_table_queue = g_async_queue_new();
   conf.post_queue = g_async_queue_new();
@@ -463,17 +477,22 @@ int main(int argc, char *argv[]) {
   }
 
 
-  GHashTableIter iter;
-  gchar * lkey;
-  g_hash_table_iter_init ( &iter, db_hash);
-  struct database *d=NULL;
-  while ( g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &d ) ) {
-    if (d->schema_checksum != NULL && !no_schemas)
-      checksum_database_template(d->real_database, d->schema_checksum,  conn, "Schema create checksum", checksum_database_defaults);
-    if (d->post_checksum != NULL && !skip_post)
-      checksum_database_template(d->real_database, d->post_checksum,  conn, "Post checksum", checksum_process_structure);
-    if (d->triggers_checksum != NULL && !skip_triggers)
-      checksum_database_template(d->real_database, d->triggers_checksum,  conn, "Triggers checksum", checksum_trigger_structure_from_database);
+  if (checksum_mode != CHECKSUM_SKIP) {
+    GHashTableIter iter;
+    gchar *lkey;
+    g_hash_table_iter_init(&iter, db_hash);
+    struct database *d= NULL;
+    while (g_hash_table_iter_next(&iter, (gpointer *) &lkey, (gpointer *) &d)) {
+      if (d->schema_checksum != NULL && !no_schemas)
+        checksum_database_template(d->real_database, d->schema_checksum,  conn,
+                                  "Schema create checksum", checksum_database_defaults);
+      if (d->post_checksum != NULL && !skip_post)
+        checksum_database_template(d->real_database, d->post_checksum,  conn,
+                                  "Post checksum", checksum_process_structure);
+      if (d->triggers_checksum != NULL && !skip_triggers)
+        checksum_database_template(d->real_database, d->triggers_checksum,  conn,
+                                  "Triggers checksum", checksum_trigger_structure_from_database);
+    }
   }
 
 
@@ -500,6 +519,7 @@ int main(int argc, char *argv[]) {
 
   g_async_queue_unref(conf.database_queue);
   g_async_queue_unref(conf.table_queue);
+  g_async_queue_unref(conf.retry_queue);
   g_async_queue_unref(conf.pause_resume);
   g_async_queue_unref(conf.post_table_queue);
   g_async_queue_unref(conf.post_queue);

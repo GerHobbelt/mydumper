@@ -99,6 +99,7 @@ gboolean process_schema(struct thread_data * td){
   struct database * real_db_name = NULL;
   struct control_job *job = NULL;
   gboolean ret=TRUE;
+  const gboolean postpone_load= (overwrite_tables && !overwrite_unsafe);
   ft=(enum file_type)GPOINTER_TO_INT(g_async_queue_pop(refresh_db_queue2));
   trace("refresh_db_queue2 -> %s", ft2str(ft));
   switch (ft){
@@ -108,27 +109,47 @@ gboolean process_schema(struct thread_data * td){
       real_db_name=job->data.restore_job->data.srj->database;
       trace("database_queue -> %s: %s", ft2str(ft), real_db_name->name);
       g_mutex_lock(real_db_name->mutex);
-      ret=process_job(td, job);
+      ret=process_job(td, job, NULL);
       set_db_schema_created(real_db_name, td->conf);
       trace("Set DB created: %s", real_db_name->name);
       g_mutex_unlock(real_db_name->mutex);
       break;
+    case CJT_RESUME:
+      cjt_resume();
+      // fall through
     case SCHEMA_TABLE:
     case SCHEMA_SEQUENCE: {
-      job=g_async_queue_pop(td->conf->table_queue);
+      const char *qname;
+      job= g_async_queue_pop(td->conf->table_queue);
+      qname= "table_queue";
+      if (job->type == JOB_SHUTDOWN) {
+        struct control_job *rjob= g_async_queue_try_pop(td->conf->retry_queue);
+        if (rjob) {
+          g_async_queue_push(td->conf->table_queue, job);
+          job= rjob;
+          qname= "retry_queue";
+        }
+      }
       const gboolean restore= (job->type == JOB_RESTORE);
+      gboolean retry= FALSE;
       char *filename;
       if (restore) {
         filename= job->data.restore_job->filename;
-        trace("table_queue -> %s: %s", ft2str(ft), filename);
         execute_use_if_needs_to(td, job->use_database, "Restoring table structure");
-        trace("table_queue -> %s: %s", ft2str(ft), filename);
+        trace("%s -> %s: %s", qname, ft2str(ft), filename);
       } else
-        trace("table_queue -> %s", jtype2str(job->type));
-      ret=process_job(td, job);
-      if (ft == SCHEMA_TABLE) /* TODO: for spoof view table don't do DATA */
+        trace("%s -> %s", qname, jtype2str(job->type));
+      ret= process_job(td, job, &retry);
+      if (retry) {
+        g_assert(restore);
+        trace("retry_queue <- %s: %s", ft2str(ft), filename);
+        g_async_queue_push(td->conf->retry_queue, job);
+        refresh_db_and_jobs(ft);
+        break;
+      }
+      if (ft == SCHEMA_TABLE) { /* TODO: for spoof view table don't do DATA */
         refresh_db_and_jobs(DATA);
-      else if (restore) {
+      } else if (restore) {
         g_assert(ft == SCHEMA_SEQUENCE && sequences_processed < sequences);
         g_mutex_lock(&sequences_mutex);
         ++sequences_processed;
@@ -148,6 +169,7 @@ gboolean process_schema(struct thread_data * td){
         }
         g_mutex_unlock(&sequences_mutex);
         g_hash_table_iter_init ( &iter, db_hash );
+        /* Wait while all DB created and go "second round" */
         while ( g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &real_db_name ) ) {
           g_mutex_lock(real_db_name->mutex);
           if (real_db_name->schema_state != CREATED) {
@@ -172,8 +194,11 @@ gboolean process_schema(struct thread_data * td){
           trace("table_queue <- JOB_SHUTDOWN");
           g_async_queue_push(td->conf->table_queue, new_job(JOB_SHUTDOWN,NULL,NULL));
           trace("refresh_db_queue2 <- %s (second round)", ft2str(SCHEMA_TABLE));
-          g_async_queue_push(refresh_db_queue2, GINT_TO_POINTER(SCHEMA_TABLE));
+          if (!postpone_load || n < max_threads_for_schema_creation - 1)
+            g_async_queue_push(refresh_db_queue2, GINT_TO_POINTER(SCHEMA_TABLE));
         }
+        if (postpone_load)
+          g_async_queue_push(refresh_db_queue2, GINT_TO_POINTER(CJT_RESUME));
       }
       break;
     default:
@@ -205,12 +230,13 @@ void *worker_schema_thread(struct thread_data *td) {
     }
   }
 
-  message("S-Thread %d: Starting import", td->thread_id);
+  set_thread_name("S%02u", td->thread_id);
+  message("S-Thread %u: Starting import", td->thread_id);
   gboolean cont=TRUE;
   while (cont){
     cont=process_schema(td);
   }
-  message("S-Thread %d: Import completed", td->thread_id);
+  message("S-Thread %u: Import completed", td->thread_id);
 
   if (td->thrconn)
     mysql_close(td->thrconn);

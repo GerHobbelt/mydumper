@@ -49,6 +49,7 @@ struct thread_data {
 struct configuration {
   GAsyncQueue *database_queue;
   GAsyncQueue *table_queue;
+  GAsyncQueue *retry_queue;
   GAsyncQueue *data_queue;
   GAsyncQueue *post_table_queue;
   GAsyncQueue *view_queue;
@@ -116,7 +117,7 @@ struct db_table {
   GList * restore_job_list;
   guint current_threads;
   guint max_threads;
-  guint max_threads_hard;
+  guint retry_count;
   GMutex *mutex;
   GString *indexes;
   GString *constraints;
@@ -141,8 +142,9 @@ enum file_type {
   INIT, 
   SCHEMA_TABLESPACE, 
   SCHEMA_CREATE, 
-  SCHEMA_TABLE, 
-  DATA, 
+  CJT_RESUME,
+  SCHEMA_TABLE,
+  DATA,
   SCHEMA_VIEW, 
   SCHEMA_SEQUENCE,
   SCHEMA_TRIGGER, 
@@ -170,6 +172,8 @@ const char *ft2str(enum file_type ft)
     return "SCHEMA_TABLESPACE";
   case SCHEMA_CREATE:
     return "SCHEMA_CREATE";
+  case CJT_RESUME:
+    return "CJT_RESUME";
   case SCHEMA_TABLE:
     return "SCHEMA_TABLE";
   case DATA:

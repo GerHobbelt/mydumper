@@ -117,6 +117,7 @@ gchar *get_gzip_cmd();
 char * backtick_protect(char *r);
 char * newline_protect(char *r);
 char * newline_unprotect(char *r);
+void set_thread_name(const char *format, ...);
 extern void trace(const char *format, ...);
 #define message(...) \
   if (debug) \
@@ -133,4 +134,8 @@ g_string_replace (GString     *string,
                   const gchar *find,
                   const gchar *replace,
                   guint        limit);
+#endif
+
+#if !GLIB_CHECK_VERSION(2, 36, 0)
+extern guint g_get_num_processors (void);
 #endif

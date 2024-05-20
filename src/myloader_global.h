@@ -35,7 +35,14 @@ extern gboolean program_version;
 extern guint verbose;
 extern gboolean debug;
 
+enum checksum_modes {
+  CHECKSUM_SKIP= 0,
+  CHECKSUM_WARN,
+  CHECKSUM_FAIL
+};
+
 extern gboolean disable_redo_log;
+extern enum checksum_modes checksum_mode;
 extern gchar *purge_mode_str;
 extern GString *set_global;
 extern GString *set_global_back;
@@ -56,6 +63,7 @@ extern gboolean no_data;
 extern gboolean no_schemas;
 extern gboolean no_delete;
 extern gboolean overwrite_tables;
+extern gboolean overwrite_unsafe;
 extern gboolean resume;
 extern gboolean serial_tbl_creation;
 extern gboolean shutdown_triggered;
@@ -84,8 +92,8 @@ extern guint max_errors;
 extern guint max_threads_for_index_creation;
 extern guint max_threads_for_post_creation;
 extern guint max_threads_for_schema_creation;
-extern guint max_threads_per_table_hard;
 extern guint max_threads_per_table;
+extern guint retry_count;
 extern guint num_threads;
 extern guint rows;
 extern guint sequences;

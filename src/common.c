@@ -31,6 +31,7 @@
 
 GAsyncQueue *stream_queue = NULL;
 gboolean skip_defer= FALSE;
+gboolean check_row_count= FALSE;
 
 /*
 const char *usr_bin_zstd_cmd[] = {"/usr/bin/zstd", "-c", NULL};
@@ -325,7 +326,7 @@ void load_hash_of_all_variables_perproduct_from_key_file(GKeyFile *kf, GHashTabl
   GString *s=g_string_new(str);
   load_hash_from_key_file(kf,set_session_hash,s->str);
   g_string_append_c(s,'_');
-  g_string_append(s,get_product_name());
+  g_string_append(s, g_utf8_strdown(get_product_name(), -1));
   load_hash_from_key_file(kf,set_session_hash,s->str);
   g_string_append_printf(s,"_%d",get_major());
   load_hash_from_key_file(kf,set_session_hash,s->str);
@@ -611,9 +612,13 @@ void initialize_common_options(GOptionContext *context, const gchar *group){
 
   key_file=load_config_file(defaults_file);
 
-  if (key_file!=NULL && g_key_file_has_group(key_file, group )){
-    parse_key_file_group(key_file, context, group);
-    set_connection_defaults_file_and_group(defaults_file, group); 
+  if (key_file!=NULL){
+    if (g_key_file_has_group(key_file, group )){
+      parse_key_file_group(key_file, context, group);
+      set_connection_defaults_file_and_group(defaults_file, group); 
+    }else if (g_key_file_has_group(key_file, "client" )){
+      set_connection_defaults_file_and_group(defaults_file, NULL);
+    }
   }else
     set_connection_defaults_file_and_group(defaults_file, NULL);
 
@@ -628,12 +633,17 @@ void initialize_common_options(GOptionContext *context, const gchar *group){
 
   GKeyFile * extra_key_file=load_config_file(defaults_extra_file);
 
-  if (extra_key_file!=NULL && g_key_file_has_group(extra_key_file, group )){
-    g_message("Parsing extra key file");
-    parse_key_file_group(extra_key_file, context, group);
-    set_connection_defaults_file_and_group(defaults_extra_file, group);
+  if (extra_key_file!=NULL){ 
+    if (g_key_file_has_group(extra_key_file, group )){
+      g_message("Parsing extra key file");
+      parse_key_file_group(extra_key_file, context, group);
+      set_connection_defaults_file_and_group(defaults_extra_file, group);
+    } else if (g_key_file_has_group(extra_key_file, "client" )){
+      set_connection_defaults_file_and_group(defaults_extra_file, NULL);
+    }
   }else
     set_connection_defaults_file_and_group(defaults_extra_file, NULL);
+
   g_message("Merging config files user: ");
 
   m_key_file_merge(key_file, extra_key_file);
@@ -700,7 +710,13 @@ gboolean stream_arguments_callback(const gchar *option_name,const gchar *value, 
   return FALSE;
 }
 
-void check_num_threads(){
+void check_num_threads()
+{
+  if (!num_threads) {
+    num_threads= g_get_num_processors();
+    g_assert(num_threads > 0);
+  }
+
   if (num_threads < MIN_THREAD_COUNT) {
     g_warning("Invalid number of threads %d, setting to %d", num_threads, MIN_THREAD_COUNT);
     num_threads = MIN_THREAD_COUNT;
@@ -870,6 +886,90 @@ g_string_replace (GString     *_string,
 }
 #endif
 
+#if !GLIB_CHECK_VERSION(2, 36, 0)
+/**
+ * g_get_num_processors:
+ *
+ * Determine the approximate number of threads that the system will
+ * schedule simultaneously for this process.  This is intended to be
+ * used as a parameter to g_thread_pool_new() for CPU bound tasks and
+ * similar cases.
+ *
+ * Returns: Number of schedulable threads, always greater than 0
+ *
+ * Since: 2.36
+ */
+guint
+g_get_num_processors (void)
+{
+#ifdef G_OS_WIN32
+  unsigned int count;
+  SYSTEM_INFO sysinfo;
+  DWORD_PTR process_cpus;
+  DWORD_PTR system_cpus;
+
+  /* This *never* fails, use it as fallback */
+  GetNativeSystemInfo (&sysinfo);
+  count = (int) sysinfo.dwNumberOfProcessors;
+
+  if (GetProcessAffinityMask (GetCurrentProcess (),
+                              &process_cpus, &system_cpus))
+    {
+      unsigned int af_count;
+
+      for (af_count = 0; process_cpus != 0; process_cpus >>= 1)
+        if (process_cpus & 1)
+          af_count++;
+
+      /* Prefer affinity-based result, if available */
+      if (af_count > 0)
+        count = af_count;
+    }
+
+  if (count > 0)
+    return count;
+#elif defined(_SC_NPROCESSORS_ONLN) && defined(THREADS_POSIX) && defined(HAVE_PTHREAD_GETAFFINITY_NP)
+  {
+    int idx;
+    int ncores = MIN (sysconf (_SC_NPROCESSORS_ONLN), CPU_SETSIZE);
+    cpu_set_t cpu_mask;
+    CPU_ZERO (&cpu_mask);
+
+    int af_count = 0;
+    int err = pthread_getaffinity_np (pthread_self (), sizeof (cpu_mask), &cpu_mask);
+    if (!err)
+      for (idx = 0; idx < ncores && idx < CPU_SETSIZE; ++idx)
+        af_count += CPU_ISSET (idx, &cpu_mask);
+
+    int count = (af_count > 0) ? af_count : ncores;
+    return count;
+  }
+#elif defined(_SC_NPROCESSORS_ONLN)
+  {
+    int count;
+
+    count = sysconf (_SC_NPROCESSORS_ONLN);
+    if (count > 0)
+      return count;
+  }
+#elif defined HW_NCPU
+  {
+    int mib[2], count = 0;
+    size_t len;
+
+    mib[0] = CTL_HW;
+    mib[1] = HW_NCPU;
+    len = sizeof(count);
+
+    if (sysctl (mib, 2, &count, &len, NULL, 0) == 0 && count > 0)
+      return count;
+  }
+#endif
+
+  return 1; /* Fallback */
+}
+#endif
+
 char * backtick_protect(char *r) {
   GString *s= g_string_new_len(r, strlen(r) + 1);
   g_string_replace(s, "`", "``", 0);
@@ -896,13 +996,28 @@ char * newline_unprotect(char *r) {
 
 extern gboolean debug;
 
+static __thread char __name_buf[32];
+static __thread char *__thread_name= NULL;
+
+void set_thread_name(const char *format, ...)
+{
+  va_list args;
+  va_start(args, format);
+  vsnprintf(__name_buf, sizeof(__name_buf), format, args);
+  va_end(args);
+  __thread_name= __name_buf;
+}
+
 void trace(const char *format, ...)
 {
   if (!debug)
     return;
   char format2[1024];
   char msg[1024];
-  snprintf(format2, sizeof(format2), "[%p] %s", g_thread_self(), format);
+  if (__thread_name)
+    snprintf(format2, sizeof(format2), "[%s] %s", __thread_name, format);
+  else
+    snprintf(format2, sizeof(format2), "[%p] %s", g_thread_self(), format);
   va_list args;
   va_start(args, format);
   vsnprintf(msg, sizeof(msg), format2, args);
