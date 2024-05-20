@@ -57,6 +57,7 @@
 #include "regex.h"
 #include "common.h"
 #include "common_options.h"
+#include "mydumper_global.h"
 #include "mydumper_start_dump.h"
 #include "mydumper_jobs.h"
 #include "mydumper_common.h"
@@ -299,6 +300,7 @@ void *signal_thread(void *data) {
 GHashTable * mydumper_initialize_hash_of_session_variables(){
   GHashTable * set_session_hash=initialize_hash_of_session_variables();
   g_hash_table_insert(set_session_hash,g_strdup("information_schema_stats_expiry"),g_strdup("0 /*!80003"));
+  g_hash_table_insert(set_session_hash, g_strdup("sql_mode"), g_strdup(sql_mode));
   return set_session_hash;
 }
 
@@ -312,26 +314,49 @@ MYSQL *create_connection() {
   return conn;
 }
 
-void  detect_identifier_quote_character_mix(MYSQL *conn){
+static
+void detect_quote_character(MYSQL *conn)
+{
   MYSQL_RES *res = NULL;
   MYSQL_ROW row;
+  GString *str;
 
-  gchar *query = g_strdup("SELECT FIND_IN_SET('ANSI',@@sql_mode)");
+  const char *query = "SELECT FIND_IN_SET('ANSI', @@SQL_MODE) OR FIND_IN_SET('ANSI_QUOTES', @@SQL_MODE)";
+
   if (mysql_query(conn, query)){
     g_warning("We were not able to determine ANSI mode: %s", mysql_error(conn));
     return ;
   }
-  g_free(query);
 
   if (!(res = mysql_store_result(conn))){
     g_warning("We were not able to determine ANSI mode");
     return ;
   }
   row = mysql_fetch_row(res);
-  if ((g_strcmp0(row[0], "0") && identifier_quote_character==BACKTICK)
-  || (!g_strcmp0(row[0], "0") && identifier_quote_character==DOUBLE_QUOTE )){
-    m_error("We found a mixed usage of the identifier quote character. Check SQL_MODE and --identifier-quote-character");
+  if (!strcmp(row[0], "0")) {
+    identifier_quote_character= BACKTICK;
+    identifier_quote_character_str= "`";
+    fields_enclosed_by= "\"";
+  } else {
+    identifier_quote_character= DOUBLE_QUOTE;
+    identifier_quote_character_str= "\"";
+    fields_enclosed_by= "'";
   }
+  mysql_free_result(res);
+
+  query= "SELECT REPLACE(REPLACE(REPLACE(REPLACE(@@SQL_MODE, 'NO_BACKSLASH_ESCAPES', ''), ',,', ','), 'PIPES_AS_CONCAT', ''), ',,', ',')";
+  if (mysql_query(conn, query)){
+    g_critical("Error getting SQL_MODE: %s", mysql_error(conn));
+  }
+
+  if (!(res= mysql_store_result(conn))){
+    g_critical("Error getting SQL_MODE");
+  }
+  row= mysql_fetch_row(res);
+  str= g_string_new(NULL);
+  g_string_printf(str, "'NO_AUTO_VALUE_ON_ZERO,%s'", row[0]);
+  sql_mode= str->str;
+  g_string_free(str, FALSE);
   mysql_free_result(res);
 }
 
@@ -347,6 +372,8 @@ MYSQL *create_main_connection() {
 //  detected_server = detect_server(conn);
   detect_server_version(conn);
   detected_server = get_product(); 
+  detect_quote_character(conn);
+  initialize_write();
   GHashTable * set_session_hash = mydumper_initialize_hash_of_session_variables();
   GHashTable * set_global_hash = g_hash_table_new ( g_str_hash, g_str_equal );
   if (key_file != NULL ){
@@ -387,7 +414,6 @@ MYSQL *create_main_connection() {
     break;
   }
   
-  detect_identifier_quote_character_mix(conn);
   return conn;
 }
 
@@ -677,10 +703,21 @@ void determine_ddl_lock_function(MYSQL ** conn, void(**acquire_global_lock_funct
 }
 
 
+// see write_database_on_disk() for db write to metadata
 
 void print_dbt_on_metadata_gstring(struct db_table *dbt, GString *data){
+  char *name= newline_protect(dbt->database->name);
+  char *table_filename= newline_protect(dbt->table_filename);
+  char *table= newline_protect(dbt->table);
+  const char q= identifier_quote_character;
   g_mutex_lock(dbt->chunks_mutex);
-  g_string_append_printf(data,"\n[`%s`.`%s`]\nreal_table_name=%s\nrows = %"G_GINT64_FORMAT"\n", dbt->database->name, dbt->table_filename, dbt->table, dbt->rows);
+  g_string_append_printf(data,"\n[%c%s%c.%c%s%c]\n", q, name, q, q, table_filename, q);
+  g_string_append_printf(data, "real_table_name=%s\nrows = %"G_GINT64_FORMAT"\n", table, dbt->rows);
+  g_free(name);
+  g_free(table_filename);
+  g_free(table);
+  if (dbt->is_sequence)
+    g_string_append_printf(data,"is_sequence = 1\n");
   if (dbt->data_checksum)
     g_string_append_printf(data,"data_checksum = %s\n", dbt->data_checksum);
   if (dbt->schema_checksum)
@@ -963,12 +1000,16 @@ void start_dump() {
 
 
 // TODO: this should be deleted on future releases. 
-  if (mysql_get_server_version(conn) < 40108) {
+  server_version= mysql_get_server_version(conn);
+  if (server_version < 40108) {
     mysql_query(
         conn,
         "CREATE TABLE IF NOT EXISTS mysql.mydumperdummy (a INT) ENGINE=INNODB");
     need_dummy_read = 1;
   }
+  /* TODO: MySQL also supports PACKAGE (Percona?) */
+  if (get_product() != SERVER_TYPE_MARIADB || server_version < 100300)
+    nroutines= 2;
 
   // tokudb do not support consistent snapshot
   mysql_query(conn, "SELECT @@tokudb_version");

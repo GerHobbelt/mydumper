@@ -18,6 +18,7 @@
 #include <mysql.h>
 #include <stdio.h>
 #include <pcre.h>
+#include "common_options.h"
 #define MYLOADER_MODE "myloader_mode"
 
 #define ZSTD_EXTENSION ".zst"
@@ -112,3 +113,15 @@ gchar *m_date_time_new_now_local();
 
 gchar *get_zstd_cmd();
 gchar *get_gzip_cmd();
+
+char * backtick_protect(char *r);
+char * newline_protect(char *r);
+char * newline_unprotect(char *r);
+extern void trace(const char *format, ...);
+#define message(...) \
+  if (debug) \
+    trace(__VA_ARGS__); \
+  else \
+    g_message(__VA_ARGS__);
+
+#define array_elements(A) ((guint) (sizeof(A)/sizeof(A[0])))

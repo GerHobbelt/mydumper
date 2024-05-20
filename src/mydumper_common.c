@@ -52,6 +52,11 @@ GMutex *fifo_table_mutex=NULL;
 GMutex *pipe_creation=NULL;
 GThread * cft = NULL;
 guint open_pipe=0;
+guint nroutines= 0;
+guint server_version= 0;
+
+const char *routine_type[]= {"FUNCTION", "PROCEDURE", "PACKAGE", "PACKAGE BODY"};
+
 int (*m_close)(guint thread_id, int file, gchar *filename, guint64 size, struct db_table * dbt) = NULL;
 
 void final_step_close_file(guint thread_id, gchar *filename, struct fifo *f, float size, struct db_table * dbt);
@@ -549,6 +554,8 @@ void initialize_sql_statement(GString *statement){
     if (set_names_statement)
       g_string_printf(statement,"%s;\n",set_names_statement);
     g_string_append(statement, "/*!40014 SET FOREIGN_KEY_CHECKS=0*/;\n");
+    if (sql_mode)
+      g_string_printf(statement, "/*!40101 SET SQL_MODE=%s*/;\n", sql_mode);
     if (!skip_tz) {
       g_string_append(statement, "/*!40103 SET TIME_ZONE='+00:00' */;\n");
     }
@@ -558,6 +565,8 @@ void initialize_sql_statement(GString *statement){
     }
   } else {
     g_string_printf(statement, "SET FOREIGN_KEY_CHECKS=0;\n");
+    if (sql_mode)
+      g_string_printf(statement, "SET SQL_MODE=%s;\n", sql_mode);
   }
 }
 

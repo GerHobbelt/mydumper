@@ -139,7 +139,9 @@ struct database * new_database(gchar *database, gchar *filename){
   d->name=database;
   d->real_database = g_strdup(db ? db : d->name);
   d->filename = filename;
+  g_cond_init(&d->state_cond);
   d->mutex=g_mutex_new();
+  d->sequence_queue= g_async_queue_new();
   d->queue=g_async_queue_new();;
   d->schema_state=NOT_FOUND;
   d->schema_checksum=NULL;
@@ -221,7 +223,7 @@ void execute_use_if_needs_to(struct thread_data *td, struct database *database, 
     if (td->current_database==NULL || g_strcmp0(database->real_database, td->current_database->real_database) != 0){
       td->current_database=database;
       if (execute_use(td)){
-        m_critical("Thread %d: Error switching to database `%s` %s", td->thread_id, td->current_database, msg);
+        m_critical("Thread %d: Error switching to database `%s` %s", td->thread_id, td->current_database->real_database, msg);
       }
     }
   }
