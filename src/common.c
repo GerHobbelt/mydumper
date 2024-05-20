@@ -30,7 +30,7 @@
 #include "mydumper_global.h"
 
 GAsyncQueue *stream_queue = NULL;
-gboolean skip_defer= FALSE;
+gboolean use_defer= FALSE;
 gboolean check_row_count= FALSE;
 
 /*
@@ -706,7 +706,7 @@ gboolean stream_arguments_callback(const gchar *option_name,const gchar *value, 
   (void) data;
   if (g_strstr_len(option_name,8,"--stream")){
     stream = TRUE;
-    skip_defer= TRUE;
+    use_defer= FALSE;
     if (value==NULL || g_strstr_len(value,11,"TRADITIONAL")){
       return TRUE;
     }
@@ -982,6 +982,14 @@ g_get_num_processors (void)
   return 1; /* Fallback */
 }
 #endif
+
+char * double_quoute_protect(char *r) {
+  GString *s= g_string_new_len(r, strlen(r) + 1);
+  g_string_replace(s, "\"", "\"\"", 0);
+  g_assert (s->str != r);
+  r= g_string_free(s, FALSE);
+  return r;
+}
 
 char * backtick_protect(char *r) {
   GString *s= g_string_new_len(r, strlen(r) + 1);
