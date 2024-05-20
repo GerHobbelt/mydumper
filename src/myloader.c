@@ -61,6 +61,7 @@
 #include "myloader_worker_schema.h"
 #include "myloader_worker_loader.h"
 #include "myloader_worker_post.h"
+#include "myloader_control_job.h"
 
 guint commit_count = 1000;
 gchar *input_directory = NULL;
@@ -82,7 +83,6 @@ guint rows = 0;
 guint sequences = 0;
 guint sequences_processed = 0;
 GMutex sequences_mutex;
-GCond sequences_cond;
 gchar *source_db = NULL;
 gchar *purge_mode_str=NULL;
 guint errors = 0;
@@ -446,6 +446,7 @@ int main(int argc, char *argv[]) {
   initialize_post_loding_threads(&conf);
   create_post_shutdown_job(&conf);
   wait_post_worker_to_finish();
+  wait_control_job();
   g_async_queue_unref(conf.ready);
   conf.ready=NULL;
 
@@ -478,8 +479,9 @@ int main(int argc, char *argv[]) {
 
   if (stream && no_delete == FALSE && input_directory == NULL){
     m_remove(directory,"metadata");
-    if (g_rmdir(directory) != 0)
-        g_critical("Restore directory not removed: %s", directory);
+    m_remove(directory, "metadata.header");
+    if (g_rmdir(directory) < 0)
+        g_warning("Restore directory not removed: %s (%s)", directory, strerror(errno));
   }
 
   if (change_master_statement != NULL ){

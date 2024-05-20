@@ -300,7 +300,11 @@ void *signal_thread(void *data) {
 GHashTable * mydumper_initialize_hash_of_session_variables(){
   GHashTable * set_session_hash=initialize_hash_of_session_variables();
   g_hash_table_insert(set_session_hash,g_strdup("information_schema_stats_expiry"),g_strdup("0 /*!80003"));
-  g_hash_table_insert(set_session_hash, g_strdup("sql_mode"), g_strdup(sql_mode));
+  GString *str= g_string_new(sql_mode);
+  g_string_replace(str, "ORACLE", "", 0);
+  g_string_replace(str, ",,", ",", 0);
+  g_hash_table_insert(set_session_hash, g_strdup("sql_mode"), str->str);
+  g_string_free(str, FALSE);
   return set_session_hash;
 }
 
@@ -344,7 +348,7 @@ void detect_quote_character(MYSQL *conn)
   }
   mysql_free_result(res);
 
-  query= "SELECT REPLACE(REPLACE(REPLACE(REPLACE(@@SQL_MODE, 'NO_BACKSLASH_ESCAPES', ''), ',,', ','), 'PIPES_AS_CONCAT', ''), ',,', ',')";
+  query= "SELECT @@SQL_MODE";
   if (mysql_query(conn, query)){
     g_critical("Error getting SQL_MODE: %s", mysql_error(conn));
   }
@@ -355,6 +359,26 @@ void detect_quote_character(MYSQL *conn)
   row= mysql_fetch_row(res);
   str= g_string_new(NULL);
   g_string_printf(str, "'NO_AUTO_VALUE_ON_ZERO,%s'", row[0]);
+  g_string_replace(str, "NO_BACKSLASH_ESCAPES", "", 0);
+  g_string_replace(str, ",,", ",", 0);
+
+  /*
+    The below 4 will be returned back if there is ORACLE in SQL_MODE. We can
+    not remove ORACLE from dump files because restoring PACKAGE requires it. But we
+    may remove ORACLE from mydumper session because SHOW CREATE PACKAGE works
+    without ORACLE (see mydumper_initialize_hash_of_session_variables()).
+    The dump must retain all table options, so we cut out NO_TABLE_OPTIONS here:
+    it doesn't play any role in dump files, but we are interested it doesn't
+    appear in mydumpmer session.
+  */
+  g_string_replace(str, "PIPES_AS_CONCAT", "", 0);
+  g_string_replace(str, ",,", ",", 0);
+  g_string_replace(str, "NO_KEY_OPTIONS", "", 0);
+  g_string_replace(str, ",,", ",", 0);
+  g_string_replace(str, "NO_TABLE_OPTIONS", "", 0);
+  g_string_replace(str, ",,", ",", 0);
+  g_string_replace(str, "NO_FIELD_OPTIONS", "", 0);
+  g_string_replace(str, ",,", ",", 0);
   sql_mode= str->str;
   g_string_free(str, FALSE);
   mysql_free_result(res);
@@ -861,6 +885,11 @@ void send_lock_all_tables(MYSQL *conn){
 }
 
 void start_dump() {
+  if (clear_dumpdir)
+    clear_dump_directory(dump_directory);
+  else if (!dirty_dumpdir && !is_empty_dir(dump_directory)) {
+    g_error("Directory is not empty (use --clear or --dirty): %s\n", dump_directory);
+  }
   initialize_start_dump();
   initialize_common();
 
@@ -883,7 +912,9 @@ void start_dump() {
   MYSQL *conn = create_main_connection();
   main_connection = conn;
   MYSQL *second_conn = conn;
-  struct configuration conf = {1, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0};
+  struct configuration conf;
+  memset(&conf, 0, sizeof(conf));
+  conf.use_any_index= 1;
   char *metadata_partial_filename, *metadata_filename;
   char *u;
 //  detect_server_version(conn);
@@ -926,12 +957,15 @@ void start_dump() {
     }
   }
 
-  metadata_partial_filename = g_strdup_printf("%s/metadata.partial", dump_directory);
-  metadata_filename = g_strndup(metadata_partial_filename, (unsigned)strlen(metadata_partial_filename) - 8);
+  if (stream)
+    metadata_partial_filename= g_strdup_printf("%s/metadata.header", dump_directory);
+  else
+    metadata_partial_filename= g_strdup_printf("%s/metadata.partial", dump_directory);
+  metadata_filename = g_strdup_printf("%s/metadata", dump_directory);
 
   FILE *mdfile = g_fopen(metadata_partial_filename, "w");
   if (!mdfile) {
-    m_critical("Couldn't write metadata file %s (%d)", metadata_partial_filename, errno);
+    m_critical("Couldn't create metadata file %s (%s)", metadata_partial_filename, strerror(errno));
   }
 
   if (updated_since > 0) {
@@ -1052,8 +1086,23 @@ void start_dump() {
   g_message("Started dump at: %s", datetimestr);
   g_free(datetimestr);
 
+  /* Write dump config into beginning of metadata, stream this first */
+  {
+    g_assert(identifier_quote_character == BACKTICK || identifier_quote_character == DOUBLE_QUOTE);
+    const char *qc= identifier_quote_character == BACKTICK ? "BACKTICK" : "DOUBLE_QUOTE";
+    fprintf(mdfile, "[config]\nquote_character = %s\n", qc);
+    fflush(mdfile);
+  }
+
   if (stream){
     initialize_stream();
+    stream_queue_push(NULL, g_strdup(metadata_partial_filename));
+    fclose(mdfile);
+    metadata_partial_filename= g_strdup_printf("%s/metadata.partial", dump_directory);
+    mdfile= g_fopen(metadata_partial_filename, "w");
+    if (!mdfile) {
+      m_critical("Couldn't create metadata file %s (%s)", metadata_partial_filename, strerror(errno));
+    }
   }
 
   if (exec_command != NULL){
@@ -1069,9 +1118,22 @@ void start_dump() {
   conf.initial_queue = g_async_queue_new();
   conf.schema_queue = g_async_queue_new();
   conf.post_data_queue = g_async_queue_new();
-  conf.innodb_queue = g_async_queue_new();
+  conf.innodb.queue= g_async_queue_new();
+  conf.innodb.defer= g_async_queue_new();
+  // These are initialized in the guts of initialize_start_dump() above
+  g_assert(give_me_another_innodb_chunk_step_queue &&
+           give_me_another_non_innodb_chunk_step_queue &&
+           innodb_table &&
+           non_innodb_table);
+  conf.innodb.request_chunk= give_me_another_innodb_chunk_step_queue;
+  conf.innodb.table_list= innodb_table;
+  conf.innodb.descr= "InnoDB";
   conf.ready = g_async_queue_new();
-  conf.non_innodb_queue = g_async_queue_new();
+  conf.non_innodb.queue= g_async_queue_new();
+  conf.non_innodb.defer= g_async_queue_new();
+  conf.non_innodb.request_chunk= give_me_another_non_innodb_chunk_step_queue;
+  conf.non_innodb.table_list= non_innodb_table;
+  conf.non_innodb.descr= "Non-InnoDB";
   conf.ready_non_innodb_queue = g_async_queue_new();
   conf.unlock_tables = g_async_queue_new();
   conf.gtid_pos_checked = g_async_queue_new();
@@ -1238,7 +1300,11 @@ void start_dump() {
     g_message("Releasing DDL lock");
     release_ddl_lock_function(second_conn);
   }
-  g_message("Queue count: %d %d %d %d %d", g_async_queue_length(conf.initial_queue), g_async_queue_length(conf.schema_queue), g_async_queue_length(conf.non_innodb_queue), g_async_queue_length(conf.innodb_queue), g_async_queue_length(conf.post_data_queue));
+  g_message("Queue count: %d %d %d %d %d", g_async_queue_length(conf.initial_queue),
+            g_async_queue_length(conf.schema_queue),
+            g_async_queue_length(conf.non_innodb.queue) + g_async_queue_length(conf.non_innodb.defer),
+            g_async_queue_length(conf.innodb.queue) + g_async_queue_length(conf.innodb.defer),
+            g_async_queue_length(conf.post_data_queue));
   // close main connection
   if (conn != second_conn)
     mysql_close(second_conn);
@@ -1248,25 +1314,28 @@ void start_dump() {
 
 
   wait_close_files();
-  GHashTableIter iter;
-  g_hash_table_iter_init ( &iter, all_dbts );
-  gchar *lkey;
-  while ( g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &dbt ) ) {
-//    dbt = (struct db_table *)iter->data;
+
+  GList *keys= g_hash_table_get_keys(all_dbts);
+  keys= g_list_sort(keys, key_strcmp);
+  for (GList *it= keys; it; it= g_list_next(it)) {
+    dbt= (struct db_table *) g_hash_table_lookup(all_dbts, it->data);
+    g_assert(dbt);
     print_dbt_on_metadata(mdfile, dbt);
-    free_db_table(dbt);
   }
-  g_hash_table_unref(all_dbts);
   write_database_on_disk(mdfile);
   g_list_free(table_schemas);
   table_schemas=NULL;
   if (pmm){
     kill_pmm_thread();
   }
-  g_async_queue_unref(conf.innodb_queue);
-  conf.innodb_queue=NULL;
-  g_async_queue_unref(conf.non_innodb_queue);
-  conf.non_innodb_queue=NULL;
+  g_async_queue_unref(conf.innodb.defer);
+  conf.innodb.defer= NULL;
+  g_async_queue_unref(conf.innodb.queue);
+  conf.innodb.queue= NULL;
+  g_async_queue_unref(conf.non_innodb.defer);
+  conf.non_innodb.defer= NULL;
+  g_async_queue_unref(conf.non_innodb.queue);
+  conf.non_innodb.queue= NULL;
   g_async_queue_unref(conf.unlock_tables);
   conf.unlock_tables=NULL;
   g_async_queue_unref(conf.ready);
@@ -1289,15 +1358,11 @@ void start_dump() {
   fclose(mdfile);
   if (updated_since > 0)
     fclose(nufile);
-  g_rename(metadata_partial_filename, metadata_filename);
-  if (stream) stream_queue_push(NULL, g_strdup(metadata_filename));
 
-  g_free(metadata_partial_filename);
-  g_free(metadata_filename);
-  g_message("Finished dump at: %s",datetimestr);
-  g_free(datetimestr);
+  g_rename(metadata_partial_filename, metadata_filename);
 
   if (stream) {
+    stream_queue_push(NULL, g_strdup(metadata_filename));
     if (exec_command!=NULL){
       wait_exec_command_to_finish();
     }else{
@@ -1308,6 +1373,17 @@ void start_dump() {
       if (g_rmdir(output_directory) != 0)
         g_critical("Backup directory not removed: %s", output_directory);
   }
+
+  for (GList *it= keys; it; it= g_list_next(it)) {
+    dbt= (struct db_table *) g_hash_table_lookup(all_dbts, it->data);
+    free_db_table(dbt);
+  }
+  g_list_free(keys);
+  g_hash_table_unref(all_dbts);
+  g_free(metadata_partial_filename);
+  g_free(metadata_filename);
+  g_message("Finished dump at: %s", datetimestr);
+  g_free(datetimestr);
 
   g_free(td);
   g_free(threads);
