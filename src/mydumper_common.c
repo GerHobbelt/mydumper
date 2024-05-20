@@ -37,35 +37,25 @@
 #include "mydumper_start_dump.h"
 #include "mydumper_stream.h"
 #include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <sys/file.h>
 
 GAsyncQueue *close_file_queue=NULL;
 GMutex *ref_table_mutex = NULL;
 GHashTable *ref_table=NULL;
 guint table_number=0;
 GAsyncQueue *available_pids=NULL;
-GAsyncQueue *available_pids_hard=NULL;
 GHashTable *fifo_hash=NULL;
-GHashTable *fifo_hash_by_pid=NULL;
+//GHashTable *fifo_hash_by_pid=NULL;
 GMutex *fifo_table_mutex=NULL;
+GMutex *pipe_creation=NULL;
 GThread * cft = NULL;
 guint open_pipe=0;
-int (*m_close)(guint thread_id, void *file, gchar *filename, guint64 size, struct db_table * dbt) = NULL;
+int (*m_close)(guint thread_id, int file, gchar *filename, guint64 size, struct db_table * dbt) = NULL;
 
-void * wait_pid(void *data){
-  (void)data;
-  int status=0;
-  int child_pid;
-  g_message("Waiting pid started");
-  for (;;){
-    child_pid=wait(&status);
-//    g_message("Waiting pid finish: %d", child_pid);
-    if (child_pid>0)
-      child_process_ended(child_pid);
-  }
-  return NULL;
-}
+guint number_list[100];
 
-void release_pid_hard();
 void final_step_close_file(guint thread_id, gchar *filename, struct fifo *f, float size, struct db_table * dbt);
 
 void * close_file_thread(void *data){
@@ -73,13 +63,28 @@ void * close_file_thread(void *data){
   struct fifo *f=NULL;
   for (;;){
     f=g_async_queue_pop(close_file_queue);
-    if (f->pid == -10)
+    if (f->gpid == -10)
       break;
-    g_async_queue_pop(available_pids_hard);
-//    g_message("Pop so I can remove: %s", f->filename);
-    g_async_queue_pop(f->queue);
-    release_pid_hard();
-    remove(f->filename);
+    g_mutex_lock(pipe_creation);
+//    fclose(f->fdin);
+    close(f->pipe[1]);
+    close(f->pipe[0]);
+    if (number_list[f->pipe[0]]==0 || number_list[f->pipe[1]]==0 ){
+	    g_message("THIS IS  APROBLEMA");
+    } 
+    number_list[f->pipe[0]]=0;
+    number_list[f->pipe[1]]=0;
+    g_mutex_unlock(pipe_creation);
+    g_message("Waiting: %s to finally close", f->filename);
+    g_mutex_lock(f->out_mutex);
+    if (f->error_number==EAGAIN){
+      usleep(1000);
+    }
+    if (fsync(f->fdout))
+      g_error("while syncing file %s (%d)",f->filename, errno);
+    close(f->fdout);
+
+    release_pid();
     final_step_close_file(0, f->filename, f, f->size, f->dbt);
     g_atomic_int_dec_and_test(&open_pipe);
     g_message("Removed: %s | Pipe Files still open: %d", f->filename, g_atomic_int_get(&open_pipe));
@@ -87,41 +92,96 @@ void * close_file_thread(void *data){
   return NULL;
 }
 
+
 void initialize_common(){
+guint i=0;
+for (i=0; i<100; i++)
+number_list[i]=0 ;
+
   available_pids = g_async_queue_new(); 
-  available_pids_hard = g_async_queue_new();
   close_file_queue=g_async_queue_new();
 
-  guint i=0;
   for (i=0; i < (num_threads * 2); i++){
     release_pid();
   }
-  for (i=0; i < (num_threads * 1 ); i++){
-    release_pid_hard();
-  }
   ref_table_mutex = g_mutex_new();
+  pipe_creation = g_mutex_new();
   ref_table=g_hash_table_new_full ( g_str_hash, g_str_equal, &g_free, &g_free );
-  fifo_hash_by_pid=g_hash_table_new(g_int_hash,g_int_equal);
-  fifo_hash=g_hash_table_new(g_direct_hash,g_direct_equal);
+//  fifo_hash_by_pid=g_hash_table_new(g_int_hash,g_int_equal);
+//  fifo_hash=g_hash_table_new(g_direct_hash,g_direct_equal);
+  fifo_hash=g_hash_table_new(g_str_hash, g_str_equal);  
   fifo_table_mutex = g_mutex_new();
 
   cft=g_thread_create((GThreadFunc)close_file_thread, NULL, TRUE, NULL);
 
-  g_thread_create((GThreadFunc)wait_pid, NULL, FALSE, NULL);
+//  g_thread_create((GThreadFunc)wait_pid, NULL, FALSE, NULL);
 }
 
 void close_file_queue_push(struct fifo *f){
   g_async_queue_push(close_file_queue, f);
-}
+  if (f->child_pid>0){
+  int status;
+  int pid;
+  gboolean b=TRUE;
+  do{
+  do {
+    g_mutex_lock(pipe_creation);
+    pid=waitpid(f->child_pid, &status, WNOHANG);
+    g_mutex_unlock(pipe_creation);
+//    g_message("close_file_queue_push:: child pid %d waiting",f->child_pid);
+//    usleep(1000000);
+//  }else{
+//	  g_message("close_file_queue_push:: child pid %d NOT ended yet", f->child_pid);
+  
 
+    if (pid > 0){
+      b=FALSE;
+      break;
+    }else if (pid == -1 && errno == ECHILD){
+      b=FALSE;
+      break;
+    }
+
+  } while (pid == -1 && errno == EINTR); 
+  
+}while (b);
+g_message("close_file_queue_push:: %s child pid %d ended with %d and error: %d | EINTR=%d ECHILD=%d EINVAL=%d | b=%d",f->filename?f->filename:"NOFILENAME", f->child_pid, pid , errno, EINTR, ECHILD, EINVAL, b);
+//usleep(100000);
+f->error_number=errno;
+g_mutex_unlock(f->out_mutex);
+}
+}
 void wait_close_files(){
   struct fifo f;
-  f.pid=-10;
-  while (g_atomic_int_get(&open_pipe) != 0){
+  f.gpid=-10;
+  f.child_pid=-10;
+  f.filename=NULL;
+
+/*
+  guint i=0;
+  while (g_atomic_int_get(&open_pipe) != 0 && i < 5){
     g_message("Waiting files to complete");
     sleep(1);
+    i++;
+  }
+*/
+
+  GHashTableIter iter;
+  g_mutex_lock(fifo_table_mutex);
+
+  struct fifo *ff=NULL;
+  gchar * lkey=NULL;
+  if (fifo_hash){
+    g_hash_table_iter_init ( &iter, fifo_hash );
+    while ( g_hash_table_iter_next ( &iter, (gpointer *) &lkey, (gpointer *) &ff ) ) {
+//      wait_fifo(ff);
+      if (ff->queue){
+        g_async_queue_push(ff->queue, GINT_TO_POINTER(1));      
+      }
+    }
   }
 
+  g_mutex_unlock(fifo_table_mutex);
   close_file_queue_push(&f);
   g_thread_join(cft);
 }
@@ -138,66 +198,115 @@ void release_pid(){
   g_async_queue_push(available_pids, GINT_TO_POINTER(1));
 }
 
-void release_pid_hard(){
-  g_async_queue_push(available_pids_hard, GINT_TO_POINTER(1));
-//  g_message("available pids HARD queue size: %d", g_async_queue_length(available_pids_hard));
-}
+void wait_my_pid (GPid pid,
+                    gint wait_status,
+                    gpointer user_data){
 
-int execute_file_per_thread( const gchar *sql_fn, const gchar *sql_fn3){
-  g_async_queue_pop(available_pids);
+(void)pid;
+(void)wait_status;
+g_message("wait_my_pid: %d with status: %d", pid, wait_status);
+      	g_mutex_unlock(((struct fifo*)user_data)->out_mutex);
+}
+// f->pipe[0], f->fdout
+int execute_file_per_thread( int p_in[2], int out){
   int childpid=fork();
   if(!childpid){
-    FILE *sql_file2 = g_fopen(sql_fn,"r");
-    FILE *sql_file3 = g_fopen(sql_fn3,"w");
-    dup2(fileno(sql_file2), STDIN_FILENO);
-    dup2(fileno(sql_file3), STDOUT_FILENO);
-    close(fileno(sql_file2));
-    close(fileno(sql_file3));
-    execv(exec_per_thread_cmd[0],exec_per_thread_cmd);
+    dup2(p_in[0], STDIN_FILENO);
+    close(p_in[1]);
+    dup2(out, STDOUT_FILENO);
+    close(out);
+    int fd=3;
+    for (fd=3; fd<256; fd++) (void) close(fd);
+//    close();
+//    close(fileno(sql_file3));
+    execv(exec_per_thread_command[0],exec_per_thread_command);
   }
   return childpid;
 }
 
+
+
 // filename must never use the compression extension. .fifo files should be deprecated
-FILE * m_open_pipe(gchar **filename, const char *type){
+int m_open_pipe(gchar **filename, const char *type){
+  (void)type;
   g_atomic_int_inc(&open_pipe);
 
-  gchar *basefilename=g_path_get_basename(*filename);
   gchar *new_filename = g_strdup_printf("%s%s", *filename, exec_per_thread_extension);
-  if (fifo_directory != NULL){
-    *filename=g_strdup_printf("%s/%s", fifo_directory, basefilename);
-    g_free(basefilename);
-  }
-  if ( mkfifo(*filename,0666) ){
-    g_critical("cannot create named pipe %s (%d)", *filename, errno);
-  }
-  int child_proc = execute_file_per_thread(*filename,new_filename);
-  FILE *file=g_fopen(*filename,type);
-  g_mutex_lock(fifo_table_mutex); 
-  struct fifo *f=g_hash_table_lookup(fifo_hash,file);
+  (void)type;
+  g_message("Opening %s with type %s", *filename,type);
+  struct fifo *f=NULL;
 
-  if (f!=NULL){
-    g_mutex_unlock(fifo_table_mutex);
-//    g_mutex_lock(f->mutex);
-    f->pid = child_proc;
-    f->filename=g_strdup(*filename);
-    f->stdout_filename=new_filename;
-  }else{
-    f=g_new0(struct fifo, 1);
-//    f->mutex=g_mutex_new();
-//    g_mutex_lock(f->mutex);
-    f->queue = g_async_queue_new();
-    f->pid = child_proc;
-    f->filename=g_strdup(*filename);
-    f->stdout_filename=new_filename;
-    g_hash_table_insert(fifo_hash,file,f);
-    g_hash_table_insert(fifo_hash_by_pid,&(f->pid), file);
-    g_mutex_unlock(fifo_table_mutex);
+  g_mutex_lock(fifo_table_mutex);
+  f=g_hash_table_lookup(fifo_hash,*filename);
+  g_mutex_unlock(fifo_table_mutex);
+  if (f){
+    g_error("file already open: %s", *filename);
   }
-  return file;
+  f=g_new0(struct fifo, 1);
+  f->out_mutex=g_mutex_new();
+  g_mutex_lock(f->out_mutex);
+  g_message("Opening %s gzip out file", new_filename);
+  f->fdout = open(new_filename, O_CREAT|O_WRONLY|O_TRUNC|O_DSYNC, 0660);
+//  f->fdout=g_fopen(new_filename, type);  
+  if (!f->fdout){
+    g_error("opening file: %s", new_filename);
+  }
+  g_async_queue_pop(available_pids);
+//  argv=(gchar **)zstd_cmd;
+  f->queue = g_async_queue_new();
+  f->filename=g_strdup(*filename);
+  f->stdout_filename=new_filename;
+  guint e=0;
+  g_mutex_lock(pipe_creation);
+  gint status=pipe(f->pipe);
+  if (status != 0){
+    g_error("Not able to create pipe (%d)", e);
+  }
+  
+  if (number_list[f->pipe[0]]==0){
+	  number_list[f->pipe[0]]=1;
+  }else{
+	  g_message("WE HAVE APROBLEM %s", *filename);
+  }
+
+  if (number_list[f->pipe[1]]==0){
+          number_list[f->pipe[1]]=1;
+  }else{
+          g_message("WE HAVE APROBLEM %s", *filename);
+  }  
+
+
+//  f->fdin=fdopen(f->pipe[1],type);
+  f->fdin=NULL;
+/*  guint i=0;
+  for(i=0; i<2; i++)
+    g_strlcpy((gchar *)&(cmd_cmd[i]),gzip_cmd[i],50);
+    */
+//  cmd_cmd[2][0]='\0';
+//  GError* error=NULL;
+  g_message("Pipe %s fd: %d %d", *filename, f->pipe[0], f->pipe[1]);
+/*
+  gboolean b=g_spawn_async_with_pipes_and_fds(NULL, (const gchar * const*)exec_per_thread_command, NULL, G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_LEAVE_DESCRIPTORS_OPEN, NULL, NULL, f->pipe[0], f->fdout, -1, NULL, NULL, 0,  &(f->gpid), NULL, NULL,NULL,&error);
+  if (!b){
+    g_message("g_spawn_async_with_pipes_and_fds::didn't work. Retrying: %s", error->message);
+    b=g_spawn_async_with_pipes_and_fds(NULL, (const gchar * const*) exec_per_thread_command, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, f->pipe[0], f->fdout, -1, NULL, NULL, 0,  &(f->gpid), NULL, NULL,NULL,NULL);
+    if (!b){
+      g_error("g_spawn_async_with_pipes_and_fds::didn't work. %s", *filename);
+    }
+  }
+  */
+//  g_child_watch_add(f->gpid, wait_my_pid, f);
+  f->child_pid=execute_file_per_thread(f->pipe, f->fdout);
+
+  g_mutex_unlock(pipe_creation);
+  g_mutex_lock(fifo_table_mutex);
+  g_hash_table_insert(fifo_hash,f->filename,f);
+  g_mutex_unlock(fifo_table_mutex);
+  return f->pipe[1];
 }
 
 void final_step_close_file(guint thread_id, gchar *filename, struct fifo *f, float size, struct db_table * dbt) {
+  g_message("final_step_close_file:: File to stram: %s | Size: %f", f->stdout_filename, size);
   if (size > 0){
     if (stream) stream_queue_push(dbt,g_strdup(f->stdout_filename));
   }else if (!build_empty_files){
@@ -209,52 +318,28 @@ void final_step_close_file(guint thread_id, gchar *filename, struct fifo *f, flo
   }
 }
 
-int m_close_pipe(guint thread_id, void *file, gchar *filename, guint64 size, struct db_table * dbt){
+int m_close_pipe(guint thread_id, int file, gchar *filename, guint64 size, struct db_table * dbt){
   release_pid();
-
+  (void)file;
+  (void)thread_id;
+  (void)size;
+  (void)dbt;
+  (void)filename;
   g_mutex_lock(fifo_table_mutex);
-  struct fifo *f=g_hash_table_lookup(fifo_hash,file);
+  struct fifo *f=g_hash_table_lookup(fifo_hash,filename);
   g_mutex_unlock(fifo_table_mutex);
-//  write(fileno(file), 0, sizeof(int));
-  int r=close(fileno(file));
-  if (f != NULL){
-/*    int status=0;
-    g_message("Thread %d: waitpid %d: started", thread_id, f->pid);
-    waitpid(f->pid, &status, 0);
-    g_message("Thread %d: waitpid %d: eneded", thread_id, f->pid);
-    g_mutex_lock(fifo_table_mutex);
-    g_mutex_unlock(f->mutex);
-    g_mutex_unlock(fifo_table_mutex); */
-//    g_mutex_lock(f->mutex);
-//g_message("g_async_queue_pop(f->queue: %d", f->pid);
+  if (f){
     f->size=size;
     f->dbt=dbt;
-//    g_message("Enqueueing : %s", f->filename);
     close_file_queue_push(f);
-//    g_async_queue_pop(f->queue);
-//    remove(f->filename);
+    return 0;
   }else{
-    struct fifo new_f;
-    new_f.dbt=dbt;
-    new_f.size=size;
-    new_f.filename=filename;
-    final_step_close_file(thread_id, filename, &new_f, size, dbt);
-  //  g_mutex_unlock(fifo_table_mutex);
+    g_warning("pipe %s not closed", filename);
   }
-/*  if (size > 0){
-    if (stream) stream_queue_push(dbt,g_strdup(f->stdout_filename));
-  }else if (!build_empty_files){
-    if (remove(f->stdout_filename)) {
-      g_warning("Thread %d: Failed to remove empty file : %s", thread_id, f->stdout_filename);
-    }else{
-      g_debug("Thread %d: File removed: %s", thread_id, filename);
-    } 
-}
-*/
-  return r;
+  return 1;
 }
 
-
+/*
 void child_process_ended(int child_pid){
 //  g_message("Child process: %d", child_pid);
   g_mutex_lock(fifo_table_mutex);
@@ -272,8 +357,9 @@ void child_process_ended(int child_pid){
   }
 }
 
-int m_close_file(guint thread_id, void *file, gchar *filename, guint64 size, struct db_table * dbt){
-  int r=fclose(file);
+*/
+int m_close_file(guint thread_id, int file, gchar *filename, guint64 size, struct db_table * dbt){
+  int r=close(file);
   if (size > 0){
     if (stream) stream_queue_push(dbt, g_strdup(filename));
   }else if (!build_empty_files){
