@@ -38,9 +38,8 @@ void set_transaction_isolation_level_repeatable_read(MYSQL *conn);
 gchar * build_tablespace_filename();
 gchar * build_filename(char *database, char *table, guint64 part, guint sub_part, const gchar *extension, const gchar *second_extension);
 //gchar * build_filename(char *database, char *table, guint part, guint sub_part, const gchar *extension);
-gchar * build_data_filename(char *database, char *table, guint64 part, guint sub_part);
-gchar * build_stdout_filename(char *database, char *table, guint64 part, guint sub_part, const gchar *extension, gchar *second_extension);
-gchar * build_load_data_filename(char *database, char *table, guint64 part, guint sub_part);
+gchar * build_sql_filename(char *database, char *table, guint64 part, guint sub_part);
+gchar * build_rows_filename(char *database, char *table, guint64 part, guint sub_part);
 void determine_show_table_status_columns(MYSQL_RES *result, guint *ecol, guint *ccol, guint *collcol, guint *rowscol);
 void determine_explain_columns(MYSQL_RES *result, guint *rowscol);
 void determine_charset_and_coll_columns_from_show(MYSQL_RES *result, guint *charcol, guint *collcol);
@@ -55,7 +54,7 @@ void release_pid();
 void child_process_ended(int child_pid);
 void wait_close_files();
 guint64 my_pow_two_plus_prev(guint64 prev, guint max);
-
+gboolean parse_rows_per_chunk(const gchar *rows_p_chunk, guint64 *min, guint64 *start, guint64 *max);
 
 extern guint nroutines;
 extern guint server_version;

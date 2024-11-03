@@ -23,6 +23,8 @@ struct MList;
 #define MAX_START_TRANSACTION_RETRIES 5
 #define MYDUMPER "mydumper"
 
+#include "common.h"
+
 enum job_type {
   JOB_SHUTDOWN,
   JOB_RESTORE,
@@ -226,6 +228,11 @@ struct chunk_step_item{
 };
 
 
+struct table_job_file{
+  gchar *filename;
+  int file;
+};
+
 // directory / database . table . first number . second number . extension
 // first number : used when rows is used
 // second number : when load data is used
@@ -238,10 +245,12 @@ struct table_job {
   struct chunk_step_item *chunk_step_item;
   char *order_by;
   struct db_table *dbt;
-  gchar *sql_filename;
-  int sql_file;
-  gchar *dat_filename;
-  int dat_file;
+//  gchar *sql_filename;
+//  int sql_file;
+//  gchar *dat_filename;
+//  int dat_file;
+  struct table_job_file *sql;
+  struct table_job_file *rows;
   gchar *exec_out_filename;
   float filesize;
   guint st_in_file;
@@ -280,15 +289,17 @@ struct binlog_job {
 };
 
 struct db_table {
-  struct database *database;
+  gchar *key;
+	struct database *database;
   char *table;
   char *table_filename;
   char *escaped_table;
   char *min;
   char *max;
-  gboolean no_data;
-  gboolean no_schema;
-  gboolean no_trigger;
+	struct object_to_export object_to_export;
+//  gboolean no_data;
+//  gboolean no_schema;
+//  gboolean no_trigger;
 //  char *field;
   GString *select_fields;
   gboolean complete_insert;
@@ -323,7 +334,8 @@ struct db_table {
   gchar *schema_checksum;
   gchar *indexes_checksum;
   gchar *triggers_checksum;
-  guint chunk_filesize;  
+  guint chunk_filesize;
+  gboolean split_integer_tables;
   guint64 min_chunk_step_size;
   guint64 starting_chunk_step_size;
   guint64 max_chunk_step_size;

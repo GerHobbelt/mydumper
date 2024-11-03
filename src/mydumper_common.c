@@ -36,6 +36,7 @@
 //#include <sys/wait.h>
 #include "mydumper_start_dump.h"
 #include "mydumper_stream.h"
+#include "mydumper_arguments.h"
 #include <sys/wait.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
@@ -215,16 +216,12 @@ gchar * build_filename(char *database, char *table, guint64 part, guint sub_part
   return r;
 }
 
-gchar * build_data_filename(char *database, char *table, guint64 part, guint sub_part){
-  return build_filename(database,table,part,sub_part,"sql",NULL);
+gchar * build_sql_filename(char *database, char *table, guint64 part, guint sub_part){
+  return build_filename(database,table,part,sub_part,SQL,NULL);
 }
 
-gchar * build_stdout_filename(char *database, char *table, guint64 part, guint sub_part, const gchar *extension, gchar *second_extension){
-  return build_filename(database,table,part,sub_part, extension, second_extension);
-}
-
-gchar * build_load_data_filename(char *database, char *table, guint64 part, guint sub_part){
-  return build_filename(database, table, part, sub_part, "dat", NULL);
+gchar * build_rows_filename(char *database, char *table, guint64 part, guint sub_part){
+  return build_filename(database, table, part, sub_part, rows_file_extension, NULL);
 }
 
 unsigned long m_real_escape_string(MYSQL *conn, char *to, const gchar *from, unsigned long length){
@@ -420,5 +417,36 @@ guint64 my_pow_two_plus_prev(guint64 prev, guint max){
     r*=2;
   }
   return r+prev;
+}
+
+gboolean parse_rows_per_chunk(const gchar *rows_p_chunk, guint64 *min, guint64 *start, guint64 *max){
+  gchar **split=g_strsplit(rows_p_chunk, ":", 0);
+  guint len = g_strv_length(split);
+  if ( split[0][0]=='-' ){
+    g_strfreev(split);
+    return FALSE;
+  }
+  switch (len){
+   case 0:
+     g_critical("This should not happend");
+     break;
+   case 1:
+     *start= strtol(split[0],NULL, 10);
+     *min  = *start;
+     *max  = *start;
+     break;
+   case 2:
+     *min  = strtol(split[0],NULL, 10);
+     *start= strtol(split[1],NULL, 10);
+     *max  = *start;
+     break;
+   default:
+     *min  = strtol(split[0],NULL, 10);
+     *start= strtol(split[1],NULL, 10);
+     *max  = strtol(split[2],NULL, 10);
+     break;
+  }
+  g_strfreev(split);
+  return TRUE;
 }
 
