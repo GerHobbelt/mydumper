@@ -90,7 +90,7 @@ struct db_table* append_new_db_table( struct database *real_db_name, gchar *tabl
       dbt->constraints=NULL;
       dbt->count=0;
       g_hash_table_insert(conf->table_hash, lkey, dbt);
-      refresh_table_list_without_table_hash_lock(conf);
+      refresh_table_list_without_table_hash_lock(conf, FALSE);
 //      g_message("New db_table: %s", lkey);
       dbt->schema_checksum=NULL;
       dbt->triggers_checksum=NULL;
@@ -339,6 +339,7 @@ regex_error:
             }else{
               g_string_free(alter_table_statement,TRUE);
               g_string_free(alter_table_constraint_statement,TRUE);
+              g_string_set_size(create_table_statement, 0);
               g_string_append(create_table_statement,data->str);
             }
           }

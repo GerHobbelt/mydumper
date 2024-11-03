@@ -302,8 +302,8 @@ void initialize_sql_mode(GHashTable * set_session_hash){
   GString *str= g_string_new(sql_mode);
   g_string_replace(str, "ORACLE", "", 0);
   g_string_replace(str, ",,", ",", 0);
-  set_session_hash_insert(set_session_hash, "SQL_MODE", str->str);
-  g_string_free(str, FALSE);
+  set_session_hash_insert(set_session_hash, "SQL_MODE",
+		  g_string_free(str, FALSE));
 }
 
 
@@ -397,9 +397,8 @@ void detect_sql_mode(MYSQL *conn){
   g_string_replace(str, ",,", ",", 0);
   g_string_replace(str, "STRICT_TRANS_TABLES", "", 0);
   g_string_replace(str, ",,", ",", 0);
-  sql_mode= str->str;
+  sql_mode= g_string_free(str, FALSE);
   g_assert(sql_mode);
-  g_string_free(str, FALSE);
   mysql_free_result(res);
 }
 
@@ -1136,7 +1135,9 @@ void start_dump() {
     }
   }
 
-  write_replica_info(conn, mdfile);
+  if (detected_server != SERVER_TYPE_TIDB) {
+    write_replica_info(conn, mdfile);
+  }
 
 
   if (detected_server == SERVER_TYPE_TIDB) {
@@ -1146,7 +1147,7 @@ void start_dump() {
       // Generate a @@tidb_snapshot to use for the worker threads since
       // the tidb-snapshot argument was not specified when starting mydumper
 
-      if (mysql_query(conn, "SHOW MASTER STATUS")) {
+      if (mysql_query(conn, show_binary_log_status)) {
         m_critical("Couldn't generate @@tidb_snapshot: %s", mysql_error(conn));
       } else {
 
@@ -1439,7 +1440,8 @@ void start_dump() {
       g_async_queue_pop(conf.unlock_tables);
     }
     g_message("Non-InnoDB dump complete, releasing global locks");
-    release_global_lock_function(conn);
+    if (release_global_lock_function)
+      release_global_lock_function(conn);
 //    mysql_query(conn, "UNLOCK TABLES /* FTWRL */");
     g_message("Global locks released");
     if (release_binlog_function != NULL){
