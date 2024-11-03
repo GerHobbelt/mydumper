@@ -110,7 +110,7 @@ gboolean pmm = FALSE;
 guint pause_at=0;
 guint resume_at=0;
 gchar **db_items=NULL;
-guint source_data=0;
+gint source_data=0;
 //GThread *wait_pid_thread=NULL;
 char * (*identifier_quote_character_protect)(char *r);
 //GRecMutex *ready_database_dump_mutex = NULL;
@@ -1135,7 +1135,8 @@ void start_dump() {
   }
 
   if (detected_server != SERVER_TYPE_TIDB) {
-    write_replica_info(conn, mdfile);
+    if (source_data >=0 )
+      write_replica_info(conn, mdfile);
   }
 
 
@@ -1255,13 +1256,13 @@ void start_dump() {
            non_innodb_table);
   conf.innodb.request_chunk= give_me_another_innodb_chunk_step_queue;
   conf.innodb.table_list= innodb_table;
-  conf.innodb.descr= "InnoDB";
+  conf.innodb.descr= "transactional";
   conf.ready = g_async_queue_new();
   conf.non_innodb.queue= g_async_queue_new();
   conf.non_innodb.defer= g_async_queue_new();
   conf.non_innodb.request_chunk= give_me_another_non_innodb_chunk_step_queue;
   conf.non_innodb.table_list= non_innodb_table;
-  conf.non_innodb.descr= "Non-InnoDB";
+  conf.non_innodb.descr= "non-transactional";
   conf.ready_non_innodb_queue = g_async_queue_new();
   conf.unlock_tables = g_async_queue_new();
   conf.gtid_pos_checked = g_async_queue_new();
@@ -1319,6 +1320,10 @@ void start_dump() {
     td[n].binlog_snapshot_gtid_executed = NULL;
     td[n].pause_resume_mutex=NULL;
     td[n].table_name=NULL;
+    td[n].thread_data_buffers.statement = g_string_sized_new(2*statement_size);
+    td[n].thread_data_buffers.row = g_string_sized_new(statement_size);
+    td[n].thread_data_buffers.column = g_string_sized_new(statement_size);
+    td[n].thread_data_buffers.escaped = g_string_sized_new(statement_size);
     threads[n] =
         g_thread_create((GThreadFunc)working_thread, &td[n], TRUE, NULL);
  //   g_async_queue_pop(conf.ready);

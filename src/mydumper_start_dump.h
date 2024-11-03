@@ -105,6 +105,13 @@ struct configuration {
   int done;
 };
 
+struct thread_data_buffers {
+  GString *statement;
+  GString *row;
+  GString *escaped;
+  GString *column;
+};
+
 struct thread_data {
   struct configuration *conf;
   guint thread_id;
@@ -113,6 +120,7 @@ struct thread_data {
   gboolean less_locking_stage;
   gchar *binlog_snapshot_gtid_executed;
   GMutex *pause_resume_mutex;
+  struct thread_data_buffers thread_data_buffers;
 };
 
 struct job {
@@ -243,7 +251,6 @@ struct table_job {
   GString *where;
 //  union chunk_step *chunk_step;  
   struct chunk_step_item *chunk_step_item;
-  char *order_by;
   struct db_table *dbt;
 //  gchar *sql_filename;
 //  int sql_file;

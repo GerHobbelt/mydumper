@@ -123,7 +123,7 @@ gchar *get_gzip_cmd(){
 
 GHashTable * initialize_hash_of_session_variables(){
   GHashTable * set_session_hash=g_hash_table_new ( g_str_hash, g_str_equal );
-  if (detected_server == SERVER_TYPE_MYSQL || detected_server == SERVER_TYPE_MARIADB){
+  if (is_mysql_like()){
     set_session_hash_insert(set_session_hash, "WAIT_TIMEOUT", g_strdup("2147483"));
     set_session_hash_insert(set_session_hash, "NET_WRITE_TIMEOUT", g_strdup("2147483"));
   }
@@ -517,26 +517,19 @@ void escape_tab_with(gchar *to){
 }
 
 
-void create_fifo_dir(char *new_fifo_directory) {
-  if (new_fifo_directory){
-    if (g_mkdir(new_fifo_directory, 0750) == -1) {
-      if (errno != EEXIST) {
-        m_critical("Unable to create `%s': %s", new_fifo_directory, g_strerror(errno));
-      }
+gboolean create_dir(char *directory){
+  if (g_mkdir(directory, 0750) == -1) {
+    if (errno != EEXIST) {
+      m_critical("Unable to create `%s': %s", directory, g_strerror(errno));
     }
-  }else{
-    g_warning("Fifo directoy provided was invalid");
+    return FALSE;
   }
+  return TRUE;
 }
 
-void create_backup_dir(char *new_directory, char *new_fifo_directory) {
-  if (g_mkdir(new_directory, 0750) == -1) {
-    if (errno != EEXIST) {
-      m_critical("Unable to create `%s': %s", new_directory, g_strerror(errno));
-    }
-  }
-  if (new_fifo_directory)
-    create_fifo_dir(new_fifo_directory);
+gchar *build_tmp_dir_name(){
+  GError*error=NULL;
+  return g_dir_make_tmp (NULL, &error);
 }
 
 guint strcount(gchar *text){

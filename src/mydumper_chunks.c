@@ -157,13 +157,9 @@ struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_tabl
         gboolean unsign = fields[0].flags & UNSIGNED_FLAG;
         mysql_free_result(minmax);
 
-        // If diff_btwn_max_min > min_chunk_step_size, then there is no need to split the table.
+        // If !(diff_btwn_max_min > min_chunk_step_size), then there is no need to split the table.
         if ( diff_btwn_max_min > dbt->min_chunk_step_size){
           union type type;
-          guint64 min_css = /*dbt->multicolumn ? 1 :*/ dbt->min_chunk_step_size;
-          guint64 max_css = /*dbt->multicolumn ? 1 :*/ dbt->max_chunk_step_size;
-          guint64 starting_css = /*dbt->multicolumn ? 1 :*/ dbt->starting_chunk_step_size;
-          gboolean is_step_fixed_length = (min_css!=0 && min_css == starting_css && max_css == starting_css);
 
           if (unsign){
             type.unsign.min=unmin;
@@ -173,12 +169,13 @@ struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_tabl
             type.sign.max=nmax;
           }
 
-          csi = new_integer_step_item( TRUE, prefix, field, unsign, type, 0, is_step_fixed_length, starting_css, min_css, max_css, 0, FALSE, FALSE, NULL, position);
+          gboolean is_step_fixed_length = dbt->min_chunk_step_size!=0 && dbt->min_chunk_step_size == dbt->starting_chunk_step_size && dbt->max_chunk_step_size == dbt->starting_chunk_step_size;
+          csi = new_integer_step_item( TRUE, prefix, field, unsign, type, 0, is_step_fixed_length, dbt->starting_chunk_step_size, dbt->min_chunk_step_size, dbt->max_chunk_step_size, 0, FALSE, FALSE, NULL, position);
 
           if (dbt->multicolumn && csi->position == 0){
-            if ((csi->chunk_step->integer_step.is_unsigned && (rows / (csi->chunk_step->integer_step.type.unsign.max - csi->chunk_step->integer_step.type.unsign.min) > dbt->min_chunk_step_size)
+            if ((csi->chunk_step->integer_step.is_unsigned && (rows / (csi->chunk_step->integer_step.type.unsign.max - csi->chunk_step->integer_step.type.unsign.min) > (dbt->min_chunk_step_size==0?1000:dbt->min_chunk_step_size))
                 )||(
-               (!csi->chunk_step->integer_step.is_unsigned && (rows / gint64_abs(csi->chunk_step->integer_step.type.sign.max   - csi->chunk_step->integer_step.type.sign.min)   > dbt->min_chunk_step_size)
+               (!csi->chunk_step->integer_step.is_unsigned && (rows / gint64_abs(csi->chunk_step->integer_step.type.sign.max   - csi->chunk_step->integer_step.type.sign.min)   > (dbt->min_chunk_step_size==0?1000:dbt->min_chunk_step_size))
               )
               )){
               csi->chunk_step->integer_step.min_chunk_step_size=1;
@@ -491,7 +488,7 @@ void table_job_enqueue(struct table_queuing *q)
   struct db_table *dbt;
   struct chunk_step_item *csi;
   gboolean are_there_jobs_defining=FALSE;
-  g_message("Starting %s tables", q->descr);
+  g_message("Starting to enqueue %s tables", q->descr);
   for (;;) {
     g_async_queue_pop(q->request_chunk);
     if (shutdown_triggered) {
@@ -513,22 +510,22 @@ void table_job_enqueue(struct table_queuing *q)
         switch (csi->chunk_type) {
         case INTEGER:
           if (use_defer) {
-            create_job_to_dump_chunk(dbt, NULL, csi->number, dbt->primary_key_separated_by_comma,
+            create_job_to_dump_chunk(dbt, NULL, csi->number,
                                      csi, g_async_queue_push, q->defer);
             create_job_defer(dbt, q->queue);
           } else {
-            create_job_to_dump_chunk(dbt, NULL, csi->number, dbt->primary_key_separated_by_comma,
+            create_job_to_dump_chunk(dbt, NULL, csi->number,
                                      csi, g_async_queue_push, q->queue);
           }
           break;
         case CHAR:
-          create_job_to_dump_chunk(dbt, NULL, csi->number, dbt->primary_key_separated_by_comma, csi, g_async_queue_push, q->queue);
+          create_job_to_dump_chunk(dbt, NULL, csi->number, csi, g_async_queue_push, q->queue);
           break;
         case PARTITION:
-          create_job_to_dump_chunk(dbt, NULL, csi->number, dbt->primary_key_separated_by_comma, csi, g_async_queue_push, q->queue);
+          create_job_to_dump_chunk(dbt, NULL, csi->number, csi, g_async_queue_push, q->queue);
           break;
         case NONE:
-          create_job_to_dump_chunk(dbt, NULL, 0, dbt->primary_key_separated_by_comma, csi, g_async_queue_push, q->queue);
+          create_job_to_dump_chunk(dbt, NULL, 0, csi, g_async_queue_push, q->queue);
           break;
         default:
           m_error("This should not happen %s", csi->chunk_type);
@@ -546,7 +543,7 @@ void table_job_enqueue(struct table_queuing *q)
       break;
     }
   } // for (;;)
-  g_message("%s tables completed", q->descr);
+  g_message("Enqueuing of %s tables completed", q->descr);
   enqueue_shutdown(q);
 }
 
