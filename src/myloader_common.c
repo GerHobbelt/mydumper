@@ -30,7 +30,7 @@
 #include "myloader_process.h"
 #include "myloader_restore_job.h"
 #include "myloader_control_job.h"
-
+#include "myloader_arguments.h"
 #include "connection.h"
 #include "tables_skiplist.h"
 #include "regex.h"
@@ -45,8 +45,19 @@ int (*m_close)(void *file) = NULL;
 struct database *database_db=NULL;
 guint refresh_table_list_interval=100;
 guint refresh_table_list_counter=1;
+gchar *source_gtid=NULL;
+GList *ignore_set_list=NULL;
 
 void initialize_common(){
+  if (ignore_set){
+    gchar** ignore_set_items= g_strsplit(ignore_set, ",", 0);
+    guint i=0;
+    for (i=0; g_strv_length(ignore_set_items)>i; i++){
+      ignore_set_list=g_list_prepend(ignore_set_list,g_strdup_printf(" %s",ignore_set_items[i]));
+    }
+    g_strfreev(ignore_set_items);
+  }
+  
   refresh_table_list_counter=refresh_table_list_interval;
   db_hash_mutex=g_mutex_new();
   tbl_hash=g_hash_table_new ( g_str_hash, g_str_equal );
@@ -54,6 +65,21 @@ void initialize_common(){
   if (db){
     database_db=get_db_hash(g_strdup(db), g_strdup(db));
   }
+}
+
+gboolean is_in_list(gchar *haystack, GList *list){
+  GList *l=list;
+  while(l){
+    if (g_strrstr(haystack, l->data)){
+      return TRUE;
+    }
+    l=l->next;
+  }
+  return FALSE;
+}
+
+gboolean is_in_ignore_set_list(gchar *haystack){
+  return is_in_list(haystack,ignore_set_list);
 }
 
 
@@ -74,62 +100,143 @@ void change_master(GKeyFile * kf,gchar *group, GString *output_statement){
   guint i=0;
   gsize len=0;
   GError *error = NULL;
-  GString *s=g_string_new("");
+  GString *traditional_change_source=g_string_new("");
+  GString *aws_change_source=g_string_new("");
+
+  g_string_append(traditional_change_source,change_replication_source);
+  g_string_append(traditional_change_source," TO ");
+
   gchar** group_name= g_strsplit(group, ".", 2);
   gchar* channel_name=g_strv_length(group_name)>1? group_name[1]:NULL;
   gchar **keys=g_key_file_get_keys(kf,group, &len, &error);
-  guint exec_change_master=0, exec_reset_slave=0, exec_start_slave=0;
-  g_string_append(s,change_replication_source);
-  g_string_append(s," TO ");
+  guint exec_change_source=0, exec_reset_replica=0, exec_start_replica=0;
+
+  gboolean auto_position = FALSE;
+  gboolean source_ssl = FALSE;
+  gchar *source_host = NULL;
+  guint source_port = 3306;
+  gchar *source_user = NULL;
+  gchar *source_password = NULL;
+  gchar *source_log_file= NULL;
+  guint64 source_log_pos=0;
+  gboolean first=TRUE;
   for (i=0; i < len; i++){
     if (!(g_strcmp0(keys[i], "myloader_exec_reset_slave") && g_strcmp0(keys[i], "myloader_exec_reset_replica") )){
-      exec_reset_slave=g_ascii_strtoull(g_key_file_get_value(kf,group,keys[i],&error), NULL, 10);
+      exec_reset_replica=g_ascii_strtoull(g_key_file_get_value(kf,group,keys[i],&error), NULL, 10);
     } else if (!(g_strcmp0(keys[i], "myloader_exec_change_master") && g_strcmp0(keys[i], "myloader_exec_change_source"))){
       if (g_ascii_strtoull(g_key_file_get_value(kf,group,keys[i],&error), NULL, 10) == 1 )
-        exec_change_master=1;
+        exec_change_source=1;
     } else if (!(g_strcmp0(keys[i], "myloader_exec_start_slave") && g_strcmp0(keys[i], "myloader_exec_start_replica"))){
       if (g_ascii_strtoull(g_key_file_get_value(kf,group,keys[i],&error), NULL, 10) == 1 )
-        exec_start_slave=1;
+        exec_start_replica=1;
+    } else if (!g_strcmp0(keys[i], "executed_gtid_set") ){
+      source_gtid=g_key_file_get_value(kf,group,keys[i],&error);
     } else if(!g_ascii_strcasecmp(keys[i], "channel_name")){
       channel_name=g_key_file_get_value(kf,group,keys[i],&error);
     } else {
-      val=g_key_file_get_value(kf,group,keys[i],&error);
-      if (val != NULL)
-        g_string_append_printf(s, "%s = %s, ", (gchar *) keys[i], val);
+      if (first){
+        first=FALSE;
+      }else{
+        g_string_append_printf(traditional_change_source,", ");
+      }
+      if (!g_ascii_strcasecmp(keys[i], "SOURCE_AUTO_POSITION")){
+        auto_position=g_ascii_strtoull(g_key_file_get_value(kf,group,keys[i],&error), NULL, 10)>0;
+        g_string_append_printf(traditional_change_source, "%s = %d", (gchar *) keys[i], auto_position);
+      } else if (!g_ascii_strcasecmp(keys[i], "SOURCE_SSL")){
+        source_ssl=g_ascii_strtoull(g_key_file_get_value(kf,group,keys[i],&error), NULL, 10)>0;
+        g_string_append_printf(traditional_change_source, "%s = %d", (gchar *) keys[i], source_ssl);
+      } else if (!g_ascii_strcasecmp(keys[i], "SOURCE_HOST")){
+        source_host=g_key_file_get_value(kf,group,keys[i],&error);
+        g_string_append_printf(traditional_change_source, "%s = %s", (gchar *) keys[i], source_host);
+      } else if (!g_ascii_strcasecmp(keys[i], "SOURCE_PORT")){
+        source_port=g_ascii_strtoull(g_key_file_get_value(kf,group,keys[i],&error), NULL, 10);
+        g_string_append_printf(traditional_change_source, "%s = %d", (gchar *) keys[i], source_port);
+      } else if (!g_ascii_strcasecmp(keys[i], "SOURCE_USER")){
+        source_user=g_key_file_get_value(kf,group,keys[i],&error);
+        g_string_append_printf(traditional_change_source, "%s = %s", (gchar *) keys[i], source_user);
+      } else if (!g_ascii_strcasecmp(keys[i], "SOURCE_PASSWORD")){
+        source_password=g_key_file_get_value(kf,group,keys[i],&error);
+        g_string_append_printf(traditional_change_source, "%s = %s", (gchar *) keys[i], source_password);
+      } else if (!g_ascii_strcasecmp(keys[i], "SOURCE_LOG_FILE")){
+        source_log_file=g_key_file_get_value(kf,group,keys[i],&error);
+        g_string_append_printf(traditional_change_source, "%s = %s", (gchar *) keys[i], source_log_file);
+      } else if (!g_ascii_strcasecmp(keys[i], "SOURCE_LOG_POS")){
+        source_log_pos=g_ascii_strtoull(g_key_file_get_value(kf,group,keys[i],&error), NULL, 10);
+        g_string_append_printf(traditional_change_source, "%s = %"G_GINT64_FORMAT, (gchar *) keys[i], source_log_pos);
+      } else {
+        val=g_key_file_get_value(kf,group,keys[i],&error);
+        if (val != NULL)
+          g_string_append_printf(traditional_change_source, "%s = %s", (gchar *) keys[i], val);
+      }
     }
   }
+
+  if (auto_position)
+    g_string_append(aws_change_source,"CALL mysql.rds_set_external_master_with_auto_position");
+  else
+    g_string_append(aws_change_source,"CALL mysql.rds_set_external_master");
+  
+  g_string_append_printf(aws_change_source,"( %s, %d, %s, %s, ", source_host, source_port, source_user, source_password );
+
+  if (!auto_position)
+    g_string_append_printf(aws_change_source,"%s, %"G_GINT64_FORMAT", ", source_log_file, source_log_pos);
+
+  g_string_append_printf(aws_change_source,"%d );\n", source_ssl);
+
   g_strfreev(keys);
-  g_string_set_size(s, s->len-2);
-  g_string_append_c(s,' ');
-  g_string_append(s,"FOR CHANNEL ");
+  g_string_append_c(traditional_change_source,' ');
+  g_string_append(traditional_change_source,"FOR CHANNEL ");
   if (channel_name==NULL){
-    g_string_append(s,"''");
+    g_string_append(traditional_change_source,"''");
   }else{
-    g_string_append(s,channel_name);
+    g_string_append(traditional_change_source,channel_name);
   }
-  g_string_append(s,";\n");
+  g_string_append(traditional_change_source,";\n");
 
-  if (exec_change_master){
-    if (exec_reset_slave){
-      g_string_append(output_statement,stop_replica);
-      g_string_append(output_statement,";\n");
-      g_string_append(output_statement,reset_replica);
-      g_string_append(output_statement," ");
-      if (exec_reset_slave>1)
-        g_string_append(output_statement,"ALL ");
-      if (channel_name!=NULL)
-        g_string_append_printf(output_statement,"FOR CHANNEL %s ;\n", channel_name);
-      g_string_append(output_statement,";\n");
-    }
-
-    g_string_append(output_statement,s->str);
-
-    if (exec_start_slave){
-      g_string_append(output_statement,start_replica);
-      g_string_append(output_statement,";\n");
-    }
-    g_message("Change master will be executed for channel: %s", channel_name!=NULL?channel_name:"default channel");
+  if (set_gtid_purge){
+    if (source_control_command == TRADITIONAL)
+      g_string_append_printf(output_statement, "RESET MASTER;\nSET GLOBAL gtid_purged=%s;\n", source_gtid);
+    if (source_control_command == AWS)
+      g_string_append_printf(output_statement, "CALL mysql.rds_gtid_purged (%s);\n", source_gtid);
+  
   }
+
+  if (exec_change_source){
+    if (source_control_command == TRADITIONAL){
+      if (exec_reset_replica){
+        g_string_append(output_statement,stop_replica);
+        g_string_append(output_statement,";\n");
+        g_string_append(output_statement,reset_replica);
+        g_string_append(output_statement," ");
+        if (exec_reset_replica>1)
+          g_string_append(output_statement,"ALL ");
+        if (channel_name!=NULL)
+          g_string_append_printf(output_statement,"FOR CHANNEL %s ;\n", channel_name);
+        g_string_append(output_statement,";\n");
+      }
+
+      g_string_append(output_statement,traditional_change_source->str);
+ 
+      if (exec_start_replica){
+        g_string_append(output_statement,start_replica);
+        g_string_append(output_statement,";\n");
+      }
+      g_message("Change master will be executed for channel: %s", channel_name!=NULL?channel_name:"default channel");
+    }else if (source_control_command == AWS){
+      if (exec_reset_replica){
+        g_string_append(output_statement, "CALL mysql.rds_reset_external_master();\n");
+      }
+
+      g_string_append(output_statement,aws_change_source->str);
+
+      if (exec_start_replica){
+        g_string_append(output_statement, "CALL mysql.rds_start_replication();\n");
+      }
+
+
+    }
+  }
+  g_string_free(traditional_change_source,TRUE);
 }
 
 gboolean m_filename_has_suffix(gchar const *str, gchar const *suffix){

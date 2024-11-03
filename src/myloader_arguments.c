@@ -34,15 +34,23 @@ extern gboolean show_warnings;
 extern guint refresh_table_list_interval;
 gchar *innodb_optimize_keys_str=NULL;
 gchar *checksum_str=NULL;
+guint source_control_command = TRADITIONAL;
+gboolean set_gtid_purge = FALSE;
+gchar *ignore_set=NULL;
 
 gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointer data, GError **error){
   *error=NULL;
   (void) data;
   if (!strcmp(option_name, "--innodb-optimize-keys")) {
-    innodb_optimize_keys = TRUE;
     innodb_optimize_keys_str=g_strdup(value);
     if (value==NULL){
       innodb_optimize_keys_per_table = TRUE;
+      innodb_optimize_keys_all_tables = FALSE;
+      return TRUE;
+    }
+    if (!strcasecmp(value, SKIP)) {
+      innodb_optimize_keys = FALSE;
+      innodb_optimize_keys_per_table = FALSE;
       innodb_optimize_keys_all_tables = FALSE;
       return TRUE;
     }
@@ -83,6 +91,15 @@ gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointe
       return TRUE;
     }
     g_critical("--checksum accepts: fail (default), warn, skip");
+  } else if (!strcmp(option_name, "--source-control-command")){
+    if (!strcasecmp(value, "TRADITIONAL")) {
+      source_control_command=TRADITIONAL;
+      return TRUE;
+    }
+    if (!strcasecmp(value, "AWS")) {
+      source_control_command=AWS;
+      return TRUE;
+    }
   }
 
   return FALSE;
@@ -126,7 +143,9 @@ static GOptionEntry execution_entries[] = {
     {"enable-binlog", 'e', 0, G_OPTION_ARG_NONE, &enable_binlog,
      "Enable binary logging of the restore data", NULL},
     {"innodb-optimize-keys", 0, G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK , &arguments_callback,
-     "Creates the table without the indexes and it adds them at the end. Options: AFTER_IMPORT_PER_TABLE and AFTER_IMPORT_ALL_TABLES. Default: AFTER_IMPORT_PER_TABLE", NULL},
+     "Creates the table without the indexes unless SKIP is selected.\n"
+     "It will add the indexes right after complete the table restoration by default or after import all the tables.\n"
+     "Options: AFTER_IMPORT_PER_TABLE, AFTER_IMPORT_ALL_TABLES and SKIP. Default: AFTER_IMPORT_PER_TABLE", NULL},
     { "no-schema", 0, 0, G_OPTION_ARG_NONE, &no_schemas, "Do not import table schemas and triggers ", NULL},
     { "purge-mode", 0, 0, G_OPTION_ARG_STRING, &purge_mode_str,
       "This specify the truncate mode which can be: FAIL, NONE, DROP, TRUNCATE and DELETE. Default if not set: FAIL", NULL },
@@ -143,9 +162,11 @@ static GOptionEntry execution_entries[] = {
      "Lock wait timeout exceeded retry count, default 10 (currently only for DROP TABLE)", NULL},
 
     {"serialized-table-creation",0, 0, G_OPTION_ARG_NONE, &serial_tbl_creation,
-      "Table recreation will be executed in series, one thread at a time. This means --max-threads-for-schema-creation=1. This option will be removed in future releases",NULL},
+      "Table recreation will be executed in series, one thread at a time. "
+        "This means --max-threads-for-schema-creation=1. This option will be removed in future releases",NULL},
     {"stream", 0, G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK , &stream_arguments_callback,
-     "It will receive the stream from STDIN and creates the file in the disk before start processing. Since v0.12.7-1, accepts NO_DELETE, NO_STREAM_AND_NO_DELETE and TRADITIONAL which is the default value and used if no parameter is given", NULL},
+     "It will receive the stream from STDIN and creates the file in the disk before start processing. "
+       "Since v0.12.7-1, accepts NO_DELETE, NO_STREAM_AND_NO_DELETE and TRADITIONAL which is the default value and used if no parameter is given", NULL},
     {"metadata-refresh-interval", 0, 0, G_OPTION_ARG_INT, &refresh_table_list_interval, "Every this amount of tables the internal metadata will be refreshed. If the amount of tables you have in your metadata file is high, then you should increase this value. Default: 100", NULL},
 //    {"no-delete", 0, 0, G_OPTION_ARG_NONE, &no_delete,
 //      "It will not delete the files after stream has been completed", NULL},
@@ -153,7 +174,10 @@ static GOptionEntry execution_entries[] = {
      "Not increment error count and Warning instead of Critical in case of "
      "any of the comman separated error number list",
      NULL},
-
+    {"source-control-command", 0, 0, G_OPTION_ARG_CALLBACK, &arguments_callback,
+      "Instruct the proper commands to execute depending where are configuring the replication. Options: TRADITIONAL, AWS", NULL},
+    {"set-gtid-purged", 0, 0, G_OPTION_ARG_NONE, &set_gtid_purge,
+      "After import, it will execute the SET GLOBAL gtid_purged with the value found on source section of the metadata file", NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
 
 static GOptionEntry pmm_entries[] = {
@@ -190,6 +214,7 @@ static GOptionEntry statement_entries[] ={
       "Sets the names, use it at your own risk, default binary", NULL },
     {"skip-definer", 0, 0, G_OPTION_ARG_NONE, &skip_definer,
      "Removes DEFINER from the CREATE statement. By default, statements are not modified", NULL},
+    { "ignore-set", 0, 0, G_OPTION_ARG_STRING, &ignore_set, "List of variables that will be ignored from the header of SET", NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
 
 

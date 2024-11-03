@@ -108,6 +108,15 @@ void wait_restore_threads_to_close(){
     g_thread_join(restore_threads[n]);
 }
 
+void reconnect_connection_data(struct connection_data *cd){
+  mysql_close(cd->thrconn);
+  cd->thrconn=mysql_init(NULL);
+  m_connect(cd->thrconn);
+  cd->thread_id=mysql_thread_id(cd->thrconn);
+  execute_use(cd);
+  execute_gstring(cd->thrconn, set_session);
+}
+
 int restore_data_in_gstring_by_statement(struct connection_data *cd, GString *data, gboolean is_schema, guint *query_counter)
 {
   guint en=mysql_real_query(cd->thrconn, data->str, data->len);
@@ -120,14 +129,9 @@ int restore_data_in_gstring_by_statement(struct connection_data *cd, GString *da
 
     if ( mysql_errno(cd->thrconn) != 0 && !g_list_find(ignore_errors_list, GINT_TO_POINTER(mysql_errno(cd->thrconn) ))){
       if (mysql_ping(cd->thrconn)) {
-        mysql_close(cd->thrconn);
-        cd->thrconn=mysql_init(NULL);
-        m_connect(cd->thrconn);
-        cd->thread_id=mysql_thread_id(cd->thrconn);
-        execute_gstring(cd->thrconn, set_session);
-        execute_use(cd);
+        reconnect_connection_data(cd);
         if (!is_schema && commit_count > 1) {
-          g_critical("Connection %ld - ERROR %d: Lost connection error", cd->thread_id,  mysql_errno(cd->thrconn));
+          g_critical("Connection %ld - ERROR %d: Lost connection error. %s", cd->thread_id,  mysql_errno(cd->thrconn), mysql_error(cd->thrconn));
           errors++;
           return 2;
         }
@@ -146,19 +150,6 @@ int restore_data_in_gstring_by_statement(struct connection_data *cd, GString *da
     }
   }
   *query_counter=*query_counter+1;
-  if (!is_schema) {
-    if (commit_count > 1) {
-      if (*query_counter == commit_count) {
-        *query_counter= 0;
-        if (!m_query(cd->thrconn, "COMMIT", m_warning, "COMMIT failed")) {
-          errors++;
-          return 2;
-        }
-        if (cd->transaction)
-          m_query(cd->thrconn, "START TRANSACTION", m_warning, "START TRANSACTION failed");
-      }
-    }
-  }
   g_string_set_size(data, 0);
   return 0;
 }
@@ -176,14 +167,18 @@ void setup_connection(struct connection_data *cd, struct thread_data *td, struct
   trace("Thread %d: Connection %ld granted", td->thread_id, cd->thread_id);
   if (mysql_ping(cd->thrconn)) {
     g_warning("Thread %d: Connection %ld failed", td->thread_id, cd->thread_id);
-    if (mysql_thread_id(cd->thrconn) == cd->thread_id ){
+    reconnect_connection_data(cd);
+/*    if (mysql_thread_id(cd->thrconn) == cd->thread_id ){
       mysql_close(cd->thrconn);
       cd->thrconn=mysql_init(NULL);
       m_connect(cd->thrconn);
+      execute_use(cd);
     }
     cd->thread_id=mysql_thread_id(cd->thrconn);
     g_warning("Thread %d: New connection %ld established", td->thread_id, cd->thread_id);
     execute_gstring(cd->thrconn, set_session);
+    */
+    g_warning("Thread %d: New connection %ld established", td->thread_id, cd->thread_id);
   }
   cd->transaction=start_transaction;
   if (use_database)
@@ -220,6 +215,23 @@ gboolean request_another_connection(struct thread_data *td, struct io_restore_re
   return FALSE;
 }
 
+
+int m_commit(struct connection_data *cd){
+  if (!m_query(cd->thrconn, "COMMIT", m_warning, "COMMIT failed")) {
+    errors++;
+    return 2;
+  }
+  return 0;
+}
+
+int m_commit_and_start_transaction(struct connection_data *cd, guint* query_counter){
+  int e=m_commit(cd);
+  if (e) return e;
+  *query_counter=0;
+  m_query(cd->thrconn, "START TRANSACTION", m_warning, "START TRANSACTION failed");
+  return 0;
+}
+
 int restore_insert(struct connection_data *cd,
                   GString *data, guint *query_counter, guint offset_line)
 {
@@ -248,21 +260,24 @@ int restore_insert(struct connection_data *cd,
     } while ((rows == 0 || current_rows < rows) && next_line != NULL);
     if (current_rows > 1 || (current_rows==1 && line_len>0) ){
       tr=restore_data_in_gstring_by_statement(cd, new_insert, FALSE, query_counter);
+
+      if (cd->transaction && *query_counter == commit_count) {
+        tr+=m_commit_and_start_transaction(cd,query_counter);
+      }
+
       if (tr > 0){
         g_critical("Connection %ld: Error occurs between lines: %d and %d in a splited INSERT: %s",cd->thread_id, offset_line,current_offset_line,mysql_error(cd->thrconn));
       }
       if (mysql_warning_count(cd->thrconn)){
         g_warning("Connection %ld: Warnings found during INSERT between lines: %d and %d: %s",cd->thread_id, offset_line,current_offset_line, show_warnings_if_possible(cd->thrconn));
-//        show_warnings_if_possible(cd->thrconn);
-          
       }
-      cd=NULL;
     }else
       tr=0;
     r+=tr;
     offset_line=current_offset_line+1;
     current_line++; // remove trailing ,
   } while (next_line != NULL);
+  cd=NULL;
   g_string_free(new_insert,TRUE);
   g_free(insert_statement_prefix);
   return r;
@@ -283,6 +298,8 @@ void *restore_thread(MYSQL *thrconn){
       ir=g_async_queue_pop(cd->queue->restore);
       if (ir->kind_of_statement == CLOSE){
         trace("Releasing connection: %ld", cd->thread_id);
+        if (cd->transaction && query_counter > 0)
+          m_commit(cd);
         g_async_queue_push(cd->queue->result,ir);
         cd->queue=NULL;
         ir=NULL;
@@ -317,13 +334,6 @@ void *restore_thread(MYSQL *thrconn){
           ir->error_number=mysql_errno(cd->thrconn);
         }
         g_async_queue_push(cd->queue->result,ir);
-      }
-    }
-    if (cd->transaction){
-      if (!m_query(cd->thrconn, "COMMIT", m_warning, "COMMIT failed")) {
-        g_critical("Connection %ld: Error committing data: %s",
-                cd->thread_id, mysql_error(cd->thrconn));
-        errors++;
       }
     }
     trace("Returning connection to pool: %ld", cd->thread_id);
@@ -532,7 +542,18 @@ int restore_data_from_file(struct thread_data *td, const char *filename, gboolea
             m_remove(NULL, load_data_filename);
         }else{
           if (g_strrstr_len(data->str,3,"/*!")){
-            g_string_append(header,data->str);
+            gchar *from_equal=g_strstr_len(data->str, strlen(data->str),"=");
+            if (from_equal && ignore_set ){
+            *from_equal='\0';
+            if (!is_in_ignore_set_list(data->str)) {
+              *from_equal='=';
+              g_string_append(header,data->str);
+            }else{
+              *from_equal='=';
+            }
+            }else{
+              g_string_append(header,data->str);
+            }
           }else{
             header=NULL;
           }
