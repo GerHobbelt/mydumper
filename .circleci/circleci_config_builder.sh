@@ -166,7 +166,7 @@ list_build=(
   "jammy_percona80_amd64"   # "jammy_mariadb1011_arm64"
   "noble_mysql84_amd64"
   "el7_percona57_x86_64" 
-  "el8_percona57_x86_64"     "el8_mysql80_aarch64"
+  "el8_percona80_x86_64"     "el8_mysql80_aarch64"
   "el9_percona80_x86_64"     "el9_mysql80_aarch64"
   "bullseye_percona80_amd64" 
   "buster_percona80_amd64"
@@ -565,52 +565,79 @@ echo '
     docker:
       - image: mydumper/mydumper-builder-noble
     steps:
-    - run: sudo apt install -y git dpkg-dev apt-utils
+    - run: sudo apt install -y git dpkg-dev apt-utils createrepo-c rpm
     - attach_workspace:
         at: /tmp/package    
     - run: echo ${MYDUMPER_REPO_PK} | base64 -d | gpg --import
-    - run: git clone --no-checkout https://github.com/mydumper/mydumper_repo.git mydumper_repo
+    - run: git clone --no-checkout --filter=tree:0 https://github.com/mydumper/mydumper_repo.git mydumper_repo
     - run:
         command: |
-          cd mydumper_repo/ 
+          cd mydumper_repo/
+          export DIR_SUFFIX="" && [ $(($(echo "${CIRCLE_TAG}" | cut -d'.' -f3 | cut -d'-' -f1)%2)) -eq 0 ] && export DIR_SUFFIX="testing"
+          export BASE_PATH=$(pwd)
+          export UBUNTU_PATH="apt/ubuntu/${DIR_SUFFIX}"
+          export DEBIAN_PATH="apt/debian/${DIR_SUFFIX}"
+          export YUM_PATH="yum/${DIR_SUFFIX}"
           git config --global user.name "David Ducos"
           git config --global user.email "david.ducos@gmail.com"
+          git checkout HEAD~ yum/rpmmacros
+          cp yum/rpmmacros ~/.rpmmacros
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/mydumper/mydumper_repo.git
           git reset HEAD
-          mkdir ubuntu debian'
+          mkdir -p $UBUNTU_PATH $DEBIAN_PATH $YUM_PATH'
+	  
 echo -n '
+          cd ${BASE_PATH}
+          cd ${UBUNTU_PATH}
           cp '
 echo -n $(for i in ${list_ubuntu_os[@]} ; do echo "/tmp/package/mydumper*${i}*deb"; done )
- 	  echo ' ubuntu/'
+ 	  echo ' .'
 
 echo '
-          git add ubuntu/*.deb
-          cd ubuntu 
+          git add *.deb
           dpkg-scanpackages --multiversion . > Packages
           gzip -k -f Packages
           apt-ftparchive release . > Release
           gpg --default-key "david.ducos@gmail.com" -abs -o - Release > Release.gpg
           gpg --default-key "david.ducos@gmail.com" --clearsign -o - Release > InRelease
-          git add Packages* Release* InRelease
-          cd ..
-    '
+          git add Packages* Release* InRelease'
 
 echo -n '
+          cd ${BASE_PATH}
+          cd ${DEBIAN_PATH}
           cp '
 echo -n $(for i in ${list_debian_os[@]} ; do echo "/tmp/package/mydumper*${i}*deb"; done )
-          echo ' debian/'
+          echo ' .'
 
 echo '
-          git add debian/*.deb
-          cd debian
+          git add *.deb
           dpkg-scanpackages --multiversion . > Packages
           gzip -k -f Packages
           apt-ftparchive release . > Release
           gpg --default-key "david.ducos@gmail.com" -abs -o - Release > Release.gpg
           gpg --default-key "david.ducos@gmail.com" --clearsign -o - Release > InRelease
-          git add Packages* Release* InRelease
-          git commit -m "TEST Upload repo files ${CIRCLE_TAG}" && git push
-    '
+          git add Packages* Release* InRelease'
+
+echo -n '
+          cd ${BASE_PATH}
+          cd ${YUM_PATH}
+          cp '
+echo -n $(for i in ${list_el_os[@]} ; do echo "/tmp/package/mydumper*${i}*rpm"; done )
+          echo ' .'
+
+echo '
+          gpg --export -a 79EA15C0E82E34BA > key.asc
+          rpm --import key.asc
+          rpm -q gpg-pubkey --qf "%{name}-%{version}-%{release} --> %{summary}\n"
+          rpm --addsign  *.rpm
+          git add *.rpm
+          createrepo_c --update . 
+          rm -rf repodata.old*
+          git add repodata'
+
+echo '
+          cd ${BASE_PATH}
+          git commit -m "Upload repo files ${CIRCLE_TAG}" && git push'
 
 echo '
     - run: 
