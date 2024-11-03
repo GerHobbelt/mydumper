@@ -303,24 +303,25 @@ void append_columns (GString *statement, MYSQL_FIELD *fields, guint num_fields){
 }
 
 void build_insert_statement(struct db_table * dbt, MYSQL_FIELD *fields, guint num_fields){
-  dbt->insert_statement=g_string_new(insert_statement);
-  g_string_append(dbt->insert_statement, " INTO ");
-  g_string_append_c(dbt->insert_statement, identifier_quote_character);
-  g_string_append(dbt->insert_statement, dbt->table);
-  g_string_append_c(dbt->insert_statement, identifier_quote_character);
+  GString * i_s=g_string_new(insert_statement);
+  g_string_append(i_s, " INTO ");
+  g_string_append_c(i_s, identifier_quote_character);
+  g_string_append(i_s, dbt->table);
+  g_string_append_c(i_s, identifier_quote_character);
 
   if (dbt->columns_on_insert){
-    g_string_append(dbt->insert_statement, " (");
-    g_string_append(dbt->insert_statement, dbt->columns_on_insert);
-    g_string_append(dbt->insert_statement, ")");
+    g_string_append(i_s, " (");
+    g_string_append(i_s, dbt->columns_on_insert);
+    g_string_append(i_s, ")");
   }else{
     if (dbt->complete_insert) {
-      g_string_append(dbt->insert_statement, " (");
-      append_columns(dbt->insert_statement,fields,num_fields);
-      g_string_append(dbt->insert_statement, ")");
+      g_string_append(i_s, " (");
+      append_columns(i_s,fields,num_fields);
+      g_string_append(i_s, ")");
     }
   } 
-  g_string_append(dbt->insert_statement, " VALUES");
+  g_string_append(i_s, " VALUES");
+  dbt->insert_statement=i_s;
 }
 
 gboolean real_write_data(int file, float *filesize, GString *data) {
@@ -751,6 +752,7 @@ void write_result_into_file(MYSQL *conn, MYSQL_RES *result, struct table_job * t
           tj->rows->file=0;
           update_files_on_table_job(tj);
 			  	initialize_sql_statement(statement);
+          g_string_append(statement, dbt->insert_statement->str);
 				  break;
       }
       tj->st_in_file = 0;

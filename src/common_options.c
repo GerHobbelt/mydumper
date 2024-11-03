@@ -19,7 +19,7 @@
 #include <glib/gstdio.h>
 #include <gio/gio.h>
 #include <mysql.h>
-#include "common_options.h"
+#include "common.h"
 #include "config.h"
 #include "common_options.h"
 char *db = NULL;
@@ -69,6 +69,8 @@ const char *identifier_quote_character_str= "`";
 gboolean schema_sequence_fix = FALSE;
 guint max_threads_per_table= G_MAXUINT;
 
+guint source_control_command = TRADITIONAL;
+
 GOptionEntry common_entries[] = {
     {"threads", 't', 0, G_OPTION_ARG_INT, &num_threads,
      "Number of threads to use, 0 means to use number of CPUs. Default: 4", NULL},
@@ -86,6 +88,8 @@ GOptionEntry common_entries[] = {
      "Use an additional defaults file. This is loaded after --defaults-file, replacing previous defined values", NULL},
     {"fifodir", 0, 0, G_OPTION_ARG_FILENAME, &fifo_directory,
      "Directory where the FIFO files will be created when needed. Default: Same as backup", NULL},
+    {"source-control-command", 0, 0, G_OPTION_ARG_CALLBACK, &common_arguments_callback,
+      "Instruct the proper commands to execute depending where are configuring the replication. Options: TRADITIONAL, AWS", NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
 
 
