@@ -1190,6 +1190,10 @@ commands:
     steps:
     - run: sudo yum install -y libasan gdb screen time mysql-community-libs mysql-community-devel mysql-community-client
 
+  prepare_el_mysql84:
+    steps:
+    - run: sudo yum install -y libasan gdb screen time mysql-community-libs mysql-community-devel mysql-community-client
+
   prepare_ubuntu_percona57:
     steps:
     - run: sudo percona-release setup -y ps57
@@ -1202,6 +1206,11 @@ commands:
 
   prepare_ubuntu_mysql84:
     steps:
+    - run: echo "mysql-apt-config mysql-apt-config/select-product string Ok" | sudo debconf-set-selections
+    - run: echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.4-lts" | sudo debconf-set-selections
+    - run: sudo rm /usr/share/keyrings/mysql-apt-config.gpg
+    - run: echo "4" | DEBIAN_FRONTEND=noninteractive sudo dpkg-reconfigure mysql-apt-config
+    - run: sudo apt-get update
     - run: sudo apt-get install -y gdb screen time libmysqlclient24 libmysqlclient-dev mysql-client
 
   prepare_ubuntu_mariadb1006:
@@ -5743,6 +5752,7 @@ jobs:
          root: /tmp/package
          paths:
            - .
+
   publish-github-release:
     docker:
       - image: cibuilds/github:0.10
@@ -5750,6 +5760,50 @@ jobs:
     - attach_workspace:
         at: /tmp/package
     - run: ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -prerelease -draft -delete ${CIRCLE_TAG} /tmp/package
+
+  publish-ubuntu-repository:
+    docker:
+      - image: mydumper/mydumper-builder-noble
+    steps:
+    - run: sudo apt install -y git dpkg-dev apt-utils
+    - attach_workspace:
+        at: /tmp/package    
+    - run: git clone --bare https://github.com/mydumper/mydumper_repo.git mydumper_repo
+    - run: cd mydumper_repo/
+    - run: git reset HEAD
+    - run: mkdir ubuntu debian
+
+    - run: cp /tmp/package/*.deb ubuntu/
+    - run: git add ubuntu/*.deb
+    - run: cd ubuntu
+    - run: dpkg-scanpackages --multiversion . > Packages
+    - run: gzip -k -f Packages
+    - run: apt-ftparchive release . > Release
+    - run: gpg --default-key "david.ducos@gmail.com" -abs -o - Release > Release.gpg
+    - run: gpg --default-key "david.ducos@gmail.com" --clearsign -o - Release > InRelease
+    - run: git add Packages* Release* InRelease
+    - run: cd ..
+    
+
+    - run: cp /tmp/package/*.deb debian/
+    - run: git add debian/*.deb
+    - run: cd debian
+    - run: dpkg-scanpackages --multiversion . > Packages
+    - run: gzip -k -f Packages
+    - run: apt-ftparchive release . > Release
+    - run: gpg --default-key "david.ducos@gmail.com" -abs -o - Release > Release.gpg
+    - run: gpg --default-key "david.ducos@gmail.com" --clearsign -o - Release > InRelease
+    - run: git add Packages* Release* InRelease
+    - run: cd ..
+    
+
+    - run: git commit -m "New version files ${CIRCLE_TAG}"
+    - run: git push -u origin HEAD
+    - run: cd ..
+    - run: git clone --bare https://github.com/mydumper/mydumper.git
+    - run: cd mydumper
+    - run: git submodule update --remote --merge
+
 
 workflows:
   version: 2
@@ -5761,10 +5815,6 @@ workflows:
     - compile_and_test_mydumper_in_focal_percona80
     - compile_and_test_mydumper_in_focal_mariadb1011
     - compile_and_test_mydumper_in_focal_mariadb1006
-    - compile_and_test_mydumper_in_noble_percona57
-    - compile_and_test_mydumper_in_noble_percona80
-    - compile_and_test_mydumper_in_noble_mariadb1011
-    - compile_and_test_mydumper_in_noble_mariadb1006
     - compile_and_test_mydumper_in_noble_mysql84
     - compile_and_test_mydumper_in_el7_percona57
     - compile_and_test_mydumper_in_el7_percona80
@@ -5788,7 +5838,6 @@ workflows:
     - compile_and_test_mydumper_in_bullseye_percona80
     - compile_and_test_mydumper_in_bullseye_mariadb1011
     - compile_and_test_mydumper_in_bullseye_mariadb1006
-    - compile_and_test_mydumper_in_bullseye_mysql84
     - compile_and_test_mydumper_in_bookworm_percona57
     - compile_and_test_mydumper_in_bookworm_percona80
     - compile_and_test_mydumper_in_bookworm_mariadb1011
@@ -5826,6 +5875,12 @@ workflows:
           tags:
             only: /^v\d+\.\d+\.\d+-\d+$/
     - build_jammy_percona80_amd64:
+        filters:
+          branches:
+            ignore: /.*/
+          tags:
+            only: /^v\d+\.\d+\.\d+-\d+$/
+    - build_noble_mysql84_amd64:
         filters:
           branches:
             ignore: /.*/
@@ -5879,11 +5934,13 @@ workflows:
             ignore: /.*/
           tags:
             only: /^v\d+\.\d+\.\d+-\d+$/
+
     - publish-github-release:
         requires:
           - build_bionic_percona80_amd64
           - build_focal_percona80_amd64
           - build_jammy_percona80_amd64
+          - build_noble_mysql84_amd64
           - build_el7_percona57_x86_64
           - build_el8_percona57_x86_64
           - build_el8_mysql80_aarch64
@@ -5898,3 +5955,14 @@ workflows:
           tags:
 #            only: /.*/
             only: /^v\d+\.\d+\.\d+-\d+$/
+
+    - publish-ubuntu-repository:
+        requires:
+          - publish-github-release
+        filters:
+          branches:
+            ignore: /.*/
+          tags:
+#            only: /.*/
+            only: /^v\d+\.\d+\.\d+-\d+$/
+

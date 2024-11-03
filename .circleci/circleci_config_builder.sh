@@ -164,6 +164,7 @@ list_build=(
   "bionic_percona80_amd64"   
   "focal_percona80_amd64"   # "focal_mariadb1011_arm64"
   "jammy_percona80_amd64"   # "jammy_mariadb1011_arm64"
+  "noble_mysql84_amd64"
   "el7_percona57_x86_64" 
   "el8_percona57_x86_64"     "el8_mysql80_aarch64"
   "el9_percona80_x86_64"     "el9_mysql80_aarch64"
@@ -171,16 +172,16 @@ list_build=(
   "buster_percona80_amd64"
   "bookworm_percona80_amd64")
 
-
+#   "noble_percona57"    "noble_percona80"    "noble_mariadb1011"    "noble_mariadb1006"
 list_compile=(
   "bionic_percona57"   "bionic_percona80"
   "focal_percona57"    "focal_percona80"    "focal_mariadb1011"    "focal_mariadb1006"
-  "noble_percona57"    "noble_percona80"    "noble_mariadb1011"    "noble_mariadb1006"    "noble_mysql84"
+                                                                                          "noble_mysql84"
   "el7_percona57"      "el7_percona80"      "el7_mariadb1011"      "el7_mariadb1006"      "el7_mysql84"
   "el8_percona57"      "el8_percona80"      "el8_mariadb1011"      "el8_mariadb1006"      "el8_mysql84"
                        "el9_percona80"      "el9_mariadb1011"      "el9_mariadb1006"      "el9_mysql84"
   "buster_percona57"   "buster_percona80"   "buster_mariadb1011"   "buster_mariadb1006"
-  "bullseye_percona57" "bullseye_percona80" "bullseye_mariadb1011" "bullseye_mariadb1006" "bullseye_mysql84"
+  "bullseye_percona57" "bullseye_percona80" "bullseye_mariadb1011" "bullseye_mariadb1006"
   "bookworm_percona57" "bookworm_percona80" "bookworm_mariadb1011"                        "bookworm_mysql84")
 
 list_test=("jammy_percona57" "jammy_percona80" "jammy_mariadb1011" "jammy_mariadb1006" "jammy_mysql84")
@@ -253,6 +254,10 @@ commands:
     steps:
     - run: sudo yum install -y libasan gdb screen time mysql-community-libs mysql-community-devel mysql-community-client
 
+  prepare_el_mysql84:
+    steps:
+    - run: sudo yum install -y libasan gdb screen time mysql-community-libs mysql-community-devel mysql-community-client
+
   prepare_ubuntu_percona57:
     steps:
     - run: sudo percona-release setup -y ps57
@@ -265,6 +270,11 @@ commands:
 
   prepare_ubuntu_mysql84:
     steps:
+    - run: echo "mysql-apt-config mysql-apt-config/select-product string Ok" | sudo debconf-set-selections
+    - run: echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.4-lts" | sudo debconf-set-selections
+    - run: sudo rm /usr/share/keyrings/mysql-apt-config.gpg
+    - run: echo "4" | DEBIAN_FRONTEND=noninteractive sudo dpkg-reconfigure mysql-apt-config
+    - run: sudo apt-get update
     - run: sudo apt-get install -y gdb screen time libmysqlclient24 libmysqlclient-dev mysql-client
 
   prepare_ubuntu_mariadb1006:
@@ -541,13 +551,63 @@ echo "  build_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_
     done
 done
 
-echo '  publish-github-release:
+echo '
+  publish-github-release:
     docker:
       - image: cibuilds/github:0.10
     steps:
     - attach_workspace:
         at: /tmp/package
-    - run: ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -prerelease -draft -delete ${CIRCLE_TAG} /tmp/package
+    - run: ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -prerelease -draft -delete ${CIRCLE_TAG} /tmp/package'
+
+echo '
+  publish-ubuntu-repository:
+    docker:
+      - image: mydumper/mydumper-builder-noble
+    steps:
+    - run: sudo apt install -y git dpkg-dev apt-utils
+    - attach_workspace:
+        at: /tmp/package    
+    - run: git clone --bare https://github.com/mydumper/mydumper_repo.git mydumper_repo
+    - run: cd mydumper_repo/
+    - run: git reset HEAD
+    - run: mkdir ubuntu debian'
+
+echo '
+    - run: cp /tmp/package/*.deb ubuntu/
+    - run: git add ubuntu/*.deb
+    - run: cd ubuntu
+    - run: dpkg-scanpackages --multiversion . > Packages
+    - run: gzip -k -f Packages
+    - run: apt-ftparchive release . > Release
+    - run: gpg --default-key "david.ducos@gmail.com" -abs -o - Release > Release.gpg
+    - run: gpg --default-key "david.ducos@gmail.com" --clearsign -o - Release > InRelease
+    - run: git add Packages* Release* InRelease
+    - run: cd ..
+    '
+
+
+echo '
+    - run: cp /tmp/package/*.deb debian/
+    - run: git add debian/*.deb
+    - run: cd debian
+    - run: dpkg-scanpackages --multiversion . > Packages
+    - run: gzip -k -f Packages
+    - run: apt-ftparchive release . > Release
+    - run: gpg --default-key "david.ducos@gmail.com" -abs -o - Release > Release.gpg
+    - run: gpg --default-key "david.ducos@gmail.com" --clearsign -o - Release > InRelease
+    - run: git add Packages* Release* InRelease
+    - run: cd ..
+    '
+
+echo '
+    - run: git commit -m "New version files ${CIRCLE_TAG}"
+    - run: git push -u origin HEAD
+    - run: cd ..
+    - run: git clone --bare https://github.com/mydumper/mydumper.git
+    - run: cd mydumper
+    - run: git submodule update --remote --merge
+
 
 workflows:
   version: 2
@@ -577,7 +637,8 @@ echo '        filters:
             only: /^v\d+\.\d+\.\d+-\d+$/'
 done
 
-echo '    - publish-github-release:
+echo '
+    - publish-github-release:
         requires:'
 for os in ${!list_build[@]}
 do
@@ -588,4 +649,15 @@ echo '        filters:
             ignore: /.*/
           tags:
 #            only: /.*/
-            only: /^v\d+\.\d+\.\d+-\d+$/'
+            only: /^v\d+\.\d+\.\d+-\d+$/
+
+    - publish-ubuntu-repository:
+        requires:
+          - publish-github-release
+        filters:
+          branches:
+            ignore: /.*/
+          tags:
+#            only: /.*/
+            only: /^v\d+\.\d+\.\d+-\d+$/
+'

@@ -1,7 +1,12 @@
 # Using Debian's GCC image, pinned to latest LTS, scheduled to EOL on Jun'26.
-FROM cimg/base:current-22.04 as builder
+FROM ubuntu:noble as builder
 
 ARG DEBIAN_FRONTEND=noninteractive
+
+RUN \
+  apt-get update && \
+  apt-get install -y sudo && \
+  apt-get clean
 
 # Package 'lsb-release' is required by 'percona-release' package.
 RUN \
