@@ -53,7 +53,6 @@ gboolean no_backup_locks = FALSE;
 gboolean dump_tablespaces = FALSE;
 guint updated_since = 0;
 guint trx_consistency_only = 0;
-gint source_data=0;
 gchar *exec_command=NULL;
 
 // Shared variables
@@ -384,7 +383,10 @@ MYSQL *create_main_connection() {
   case SERVER_TYPE_CLICKHOUSE:
     data_checksums=FALSE;
     break;
-	default:
+  case SERVER_TYPE_DOLT:
+    set_transaction_isolation_level_repeatable_read(conn);
+    break;
+  default:
     m_critical("Cannot detect server type");
     break;
   }
