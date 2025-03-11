@@ -53,7 +53,8 @@ void initialize_common(){
     gchar** ignore_set_items= g_strsplit(ignore_set, ",", 0);
     guint i=0;
     for (i=0; g_strv_length(ignore_set_items)>i; i++){
-      ignore_set_list=g_list_prepend(ignore_set_list,g_strdup_printf(" %s",ignore_set_items[i]));
+      g_message("Adding to ignore_st_list: %s", ignore_set_items[i]);
+      ignore_set_list=g_list_prepend(ignore_set_list,g_strdup_printf("%s",ignore_set_items[i]));
     }
     g_strfreev(ignore_set_items);
   }
@@ -70,7 +71,8 @@ void initialize_common(){
 gboolean is_in_list(gchar *haystack, GList *list){
   GList *l=list;
   while(l){
-    if (g_strrstr(haystack, l->data)){
+    g_message("comparing: %s  %s", haystack, (gchar *)(l->data));
+    if (!g_ascii_strcasecmp(haystack, l->data)){
       return TRUE;
     }
     l=l->next;
@@ -322,13 +324,17 @@ gboolean eval_table( char *db_name, char * table_name, GMutex * mutex){
 
 */
 gboolean execute_use(struct connection_data *cd){
-  gchar *query = g_strdup_printf("USE `%s`", cd->current_database->real_database);
-  if (mysql_query(cd->thrconn, query)) {
+  if (cd->current_database){
+    gchar *query = g_strdup_printf("USE `%s`", cd->current_database->real_database);
+    if (mysql_query(cd->thrconn, query)) {
 //    g_critical("Thread %d: Error switching to database `%s` %s", cd->thread_id, cd->current_database, msg);
+      g_free(query);
+      return TRUE;
+    }
     g_free(query);
-    return TRUE;
+  }else{
+    g_warning("Thread %ld: Not able to switch database", cd->thread_id);
   }
-  g_free(query);
   return FALSE;
 }
 
