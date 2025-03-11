@@ -159,7 +159,17 @@ void create_database(struct thread_data *td, gchar *database) {
 
 
 void print_errors(){
-  g_message(
+  if (detailed_errors.tablespace_errors ||
+    detailed_errors.schema_errors ||
+    detailed_errors.data_errors ||
+    detailed_errors.view_errors ||
+    detailed_errors.sequence_errors ||
+    detailed_errors.index_errors ||
+    detailed_errors.trigger_errors ||
+    detailed_errors.constraints_errors ||
+    detailed_errors.post_errors ||
+    detailed_errors.retries)
+    g_message(
     "Errors found:\n"
     "- Tablespace:\t%d\n"
     "- Schema:    \t%d\n"
@@ -265,7 +275,7 @@ int main(int argc, char *argv[]) {
 
     g_message("Using PMM resolution %s at %s", pmm_resolution, pmm_path);
     pmmthread =
-        g_thread_new("myloader_pmm",pmm_thread, &conf);
+        m_thread_new("myloader_pmm",pmm_thread, &conf, "PMM thread could not be created");
     if (pmmthread == NULL) {
       m_critical("Could not create pmm thread");
     }
@@ -412,12 +422,8 @@ int main(int argc, char *argv[]) {
   initialize_common();
   initialize_connection(MYLOADER);
   initialize_regex(NULL);
-  GThread *sthread = NULL;
   if (!kill_at_once){
-    sthread = g_thread_new("myloader_signal",signal_thread, &conf);
-    if (sthread == NULL) {
-      m_critical("Could not create signal thread");
-    }
+    m_thread_new("myloader_signal",signal_thread, &conf, "Signal thread could not be created");
   }
 
   MYSQL *conn;
@@ -485,7 +491,7 @@ int main(int argc, char *argv[]) {
     initialize_stream(&conf);
   }else{
     initialize_directory();
-    g_thread_new("myloader_directory",(GThreadFunc)process_directory, &conf);
+    m_thread_new("myloader_directory",(GThreadFunc)process_directory, &conf, "Directory thread could not be created");
   }
 
   if (!stream){
@@ -497,6 +503,11 @@ int main(int argc, char *argv[]) {
   refresh_set_global_from_hash(set_global,set_global_back, set_global_hash);
   execute_gstring(conn, set_session);
   execute_gstring(conn, set_global);
+
+  if (replication_statements->start_replica_until){
+    g_message("Sending start replica until");
+    execute_replication_commands(conn,replication_statements->start_replica_until->str);
+  }
 
   start_connection_pool(conn);
   if (disable_redo_log){
@@ -594,19 +605,21 @@ int main(int argc, char *argv[]) {
         g_warning("Restore directory not removed: %s (%s)", directory, strerror(errno));
   }
 
-  if (change_master_statement != NULL ){
-    g_message("Executing replication commands");
-    gchar** line=g_strsplit(change_master_statement->str, ";\n", -1);
-    for (i=0; i < g_strv_length(line);i++){
-       if (strlen(line[i])>2){
-         GString *str=g_string_new(line[i]);
-         g_string_append_c(str,';');
-         m_query(cd->thrconn, str->str, m_warning, "Sending CHANGE MASTER: %s", str->str);
-         g_string_free(str,TRUE);
-       }
-    }
+
+  if (replication_statements->reset_replica){
+    g_message("Sending reset replica");
+    execute_replication_commands(cd->thrconn,replication_statements->reset_replica->str);
   }
 
+  if (replication_statements->change_replication_source){
+    g_message("Sending change replication source");
+    execute_replication_commands(cd->thrconn,replication_statements->change_replication_source->str);
+  }
+
+  if (replication_statements->start_replica){
+    g_message("Sending start replica");
+    execute_replication_commands(cd->thrconn,replication_statements->start_replica->str);
+  }
 
   g_async_queue_unref(conf.database_queue);
   g_async_queue_unref(conf.table_queue);
@@ -659,6 +672,7 @@ int main(int argc, char *argv[]) {
 
   if (key_file)  g_key_file_free(key_file);
   g_remove(fifo_directory);
+  g_message("Restore completed");
   return errors ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 

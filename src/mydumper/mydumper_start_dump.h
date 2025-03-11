@@ -24,6 +24,14 @@ struct MList;
 
 #include "mydumper.h"
 
+enum sync_thread_lock_mode {
+  AUTO,
+  FTWRL,
+  LOCK_ALL,
+  GTID,
+  NO_LOCK
+};
+
 enum job_type {
   JOB_SHUTDOWN,
   JOB_RESTORE,
@@ -353,7 +361,7 @@ struct db_table {
 };
 
 
-struct stream_queue_element{
+struct filename_queue_element{
   struct db_table *dbt;
   gchar *filename;
   GAsyncQueue *done;

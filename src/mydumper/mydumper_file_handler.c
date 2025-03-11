@@ -26,7 +26,7 @@
 
 #include "mydumper_global.h"
 #include "mydumper_stream.h"
-
+#include "mydumper_exec_command.h"
 // Shared variables
 int (*m_close)(guint thread_id, int file, gchar *filename, guint64 size, struct db_table * dbt) = NULL;
 
@@ -48,7 +48,8 @@ int m_open_file(char **filename, const char *type ){
 int m_close_file(guint thread_id, int file, gchar *filename, guint64 size, struct db_table * dbt){
   int r=close(file);
   if (size > 0){
-    if (stream) stream_queue_push(dbt, g_strdup(filename));
+    if (exec_command)  exec_queue_push(dbt, g_strdup(filename));
+    else if (stream) stream_queue_push(dbt, g_strdup(filename));
   }else if (!build_empty_files){
     if (remove(filename)) {
       g_warning("Thread %d: Failed to remove empty file : %s", thread_id, filename);
@@ -236,6 +237,16 @@ void initialize_file_handler(gboolean _is_pipe){
     fifo_hash=g_hash_table_new(g_str_hash, g_str_equal);
     fifo_table_mutex = g_mutex_new();
 
-    cft=g_thread_create((GThreadFunc)close_file_thread, NULL, TRUE, NULL);
+    cft=m_thread_new("close_file", (GThreadFunc)close_file_thread, NULL, "Close file thread could not be created");
   }
 }
+
+struct filename_queue_element * new_filename_queue_element(struct db_table *dbt,gchar *filename,GAsyncQueue *done){
+  struct filename_queue_element *sf=g_new0(struct filename_queue_element, 1);
+  sf->dbt=dbt;
+  sf->filename=filename;
+  sf->done=done;
+  return sf;
+}
+
+
