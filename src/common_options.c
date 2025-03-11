@@ -25,18 +25,8 @@
 char *db = NULL;
 char *defaults_file = NULL;
 char *defaults_extra_file = NULL;
-#ifdef WITH_SSL
-//char *key = NULL;
-//char *cert = NULL;
-//char *ca = NULL;
-//char *capath = NULL;
-//char *cipher = NULL;
-//char *tls_version = NULL;
-//gchar *ssl_mode = NULL;
-#endif
 
 gboolean help =FALSE;
-int detected_server = 0;
 GString *set_session = NULL;
 GString *set_global = NULL;
 GString *set_global_back = NULL;
@@ -58,6 +48,7 @@ gchar *tables_skiplist_file = NULL;
 char **tables = NULL;
 
 gboolean no_stream = FALSE;
+gboolean no_sync=FALSE;
 
 gchar *set_names_str=NULL;
 gchar *set_names_statement=NULL;

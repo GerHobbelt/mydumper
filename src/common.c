@@ -21,19 +21,19 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <pcre.h>
+#include <stdarg.h>
 #include "regex.h"
 #include "server_detect.h"
 #include "common.h"
 #include "config.h"
 #include "connection.h"
-#include <stdarg.h>
-#include "mydumper_global.h"
+#include "common_options.h"
+//#include "mydumper_global.h"
 
 GList *ignore_errors_list=NULL;
 GAsyncQueue *stream_queue = NULL;
 gboolean use_defer= FALSE;
 gboolean check_row_count= FALSE;
-gboolean show_warnings=FALSE;
 
 /*
 const char *usr_bin_zstd_cmd[] = {"/usr/bin/zstd", "-c", NULL};
@@ -145,26 +145,6 @@ void initialize_set_names(){
 void free_set_names(){
   g_free(set_names_str);
   g_free(set_names_statement);
-}
-
-
-char *show_warnings_if_possible(MYSQL *conn){
-  if (!show_warnings)
-    return NULL;
-  MYSQL_RES *result = NULL;
-  MYSQL_ROW row;
-  if (mysql_query(conn, "SHOW WARNINGS") || !(result = mysql_use_result(conn))) {
-    g_critical("Error on SHOW WARNINGS: %s", mysql_error(conn));
-    return NULL;
-  }
-  GString *_error=g_string_new("");
-  row = mysql_fetch_row(result);
-  while (row){
-    g_string_append(_error,row[2]);
-    g_string_append(_error,"\n");
-    row = mysql_fetch_row(result);
-  }
-  return g_string_free(_error, FALSE);
 }
 
 char *generic_checksum(MYSQL *conn, char *database, char *table, int *errn,const gchar *query_template, int column_number){
@@ -776,22 +756,40 @@ gboolean stream_arguments_callback(const gchar *option_name,const gchar *value, 
   if (g_strstr_len(option_name,8,"--stream")){
     stream = TRUE;
     use_defer= FALSE;
-    if (value==NULL || g_strstr_len(value,11,"TRADITIONAL")){
+
+    if (value==NULL || !g_ascii_strcasecmp(value,"TRADITIONAL") || !g_ascii_strcasecmp(value,"0")){
       return TRUE;
     }
-    if (strlen(value)==9 && g_strstr_len(value,9,"NO_DELETE")){
+
+    guint64 val= strtol(value, NULL, 10);
+    if (errno == ERANGE || val > 7 ){
+      g_error("Value out of range on --stream");
+      return FALSE;
+    }
+
+    if (!g_ascii_strcasecmp(value,"NO_DELETE")){
       no_delete=TRUE;
       return TRUE;
     }
-    if (g_strstr_len(value,23,"NO_STREAM_AND_NO_DELETE")){
+    if (!g_ascii_strcasecmp(value,"NO_STREAM_AND_NO_DELETE")){
       no_delete=TRUE;
       no_stream=TRUE;
       return TRUE;
     }
-    if (strlen(value)==9 && g_strstr_len(value,9,"NO_STREAM")){
+    if (!g_ascii_strcasecmp(value,"NO_STREAM")){
       no_stream=TRUE;
       return TRUE;
     }
+
+    if (!val){
+      return FALSE;
+    }
+
+    if ((val) & (1<<(2))) no_stream=TRUE;
+    if ((val) & (1<<(1))) no_delete=TRUE;
+    if ((val) & (1<<(0))) no_sync=TRUE;
+    return TRUE;
+
   }
   return FALSE;
 }

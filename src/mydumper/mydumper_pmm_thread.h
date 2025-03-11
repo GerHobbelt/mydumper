@@ -12,31 +12,9 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-    Authors:        Andrew Hutchings, MariaDB Foundation (andrew at mariadb dot org)
+        Authors:    David Ducos, Percona (david dot ducos at percona dot com)
 */
-#ifndef _server_detect_h
-#define _server_detect_h
 
-#include <mysql.h>
-
-enum server_type {
-  SERVER_TYPE_UNKNOWN= 0,
-  SERVER_TYPE_MYSQL,
-  SERVER_TYPE_TIDB,
-  SERVER_TYPE_MARIADB,
-  SERVER_TYPE_PERCONA,
-  SERVER_TYPE_CLICKHOUSE,
-  SERVER_TYPE_DOLT
-};
-void detect_server_version(MYSQL * conn);
-gboolean server_support_tablespaces();
-int get_product();
-int get_major();
-int get_secondary();
-int get_revision();
-gboolean is_mysql_like();
-const gchar * get_product_name();
-#endif
-
-
-
+void initialize_pmm();
+void start_pmm_thread(struct configuration *conf);
+void stop_pmm_thread();
