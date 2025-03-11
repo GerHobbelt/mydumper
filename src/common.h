@@ -20,7 +20,7 @@
 #include <pcre.h>
 #include "common_options.h"
 #define MYLOADER_MODE "myloader_mode"
-#define IS_INNODB_TABLE 2
+#define IS_TRX_TABLE 2
 #define INCLUDE_CONSTRAINT 4
 #define IS_ALTER_TABLE_PRESENT 8
 #define START_SLAVE "START SLAVE"
@@ -93,12 +93,22 @@ struct function_pointer;
 typedef gchar * (*fun_ptr)(gchar **,gulong*, struct function_pointer*);
 
 struct function_pointer{
+  // use when writing
   fun_ptr function;
-  GHashTable *memory;
+  gboolean is_pre;
+
+  // Content after `column`=
   gchar *value;
+
+  // Used inside the function
   GList *parse;
   GList *delimiters;
-  gboolean is_pre;
+  GHashTable *memory;
+  gboolean replace_null;
+  guint max_length;
+  guint null_max_length;
+  GList *unique_list;
+  gboolean unique;
 };
 
 gchar * remove_new_line(gchar *to);

@@ -130,7 +130,7 @@ GOptionGroup * load_connection_entries(GOptionContext *context){
   return connection_group;
 }
 
-
+#ifdef WITH_SSL
 static
 void check_pem_exists(const char *filename, const char *option) {
   if (!filename)
@@ -145,7 +145,7 @@ void check_capath(const char *path) {
     m_critical("capath is not directory: %s\n", path);
 
 }
-
+#endif
 
 void configure_connection(MYSQL *conn) {
   if (connection_defaults_file != NULL)
@@ -167,7 +167,7 @@ void configure_connection(MYSQL *conn) {
 
 #ifdef WITH_SSL
 #ifdef LIBMARIADB
-  my_bool enable= 1;
+  my_bool enable= ssl_mode != NULL;
   if (ssl_mode) {
       if (g_ascii_strncasecmp(ssl_mode, "REQUIRED", 16) == 0) {
         mysql_options(conn, MYSQL_OPT_SSL_ENFORCE, &enable);
@@ -186,6 +186,8 @@ void configure_connection(MYSQL *conn) {
       else {
         m_critical("Unsupported ssl-mode specified: %s\n", ssl_mode);
       }
+  }else{
+    mysql_options(conn, MYSQL_OPT_SSL_VERIFY_SERVER_CERT, &enable);
   }
 #else
   unsigned int i;
@@ -311,7 +313,7 @@ void print_connection_details_once(){
 
 void m_connect(MYSQL *conn){
   configure_connection(conn);
-  if (!mysql_real_connect(conn, hostname, username, password, NULL, port,
+  if (!mysql_real_connect(conn, hostname, username, password, "INFORMATION_SCHEMA", port,
                           socket_path, 0)) {
     m_critical("Error connection to database: %s", mysql_error(conn));
   }

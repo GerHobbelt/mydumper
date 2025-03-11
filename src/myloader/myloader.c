@@ -52,11 +52,10 @@ gchar *pwd=NULL;
 gboolean overwrite_tables = FALSE;
 gboolean overwrite_unsafe = FALSE;
 
-gboolean innodb_optimize_keys = TRUE;
-gboolean innodb_optimize_keys_per_table = TRUE;
-gboolean innodb_optimize_keys_all_tables = FALSE;
+gboolean optimize_keys = TRUE;
+gboolean optimize_keys_per_table = TRUE;
+gboolean optimize_keys_all_tables = FALSE;
 gboolean kill_at_once = FALSE;
-gboolean enable_binlog = FALSE;
 gboolean disable_redo_log = FALSE;
 enum checksum_modes checksum_mode= CHECKSUM_FAIL;
 gboolean skip_triggers = FALSE;
@@ -101,8 +100,6 @@ gboolean pmm = FALSE;
 
 GHashTable * myloader_initialize_hash_of_session_variables(){
   GHashTable * _set_session_hash=initialize_hash_of_session_variables();
-  if (!enable_binlog)
-    set_session_hash_insert(_set_session_hash,"SQL_LOG_BIN",g_strdup("0"));
   if (commit_count > 1)
     set_session_hash_insert(_set_session_hash,"AUTOCOMMIT",g_strdup("0"));
 
@@ -339,6 +336,7 @@ int main(int argc, char *argv[]) {
     print_string("socket",socket_path);
     print_string("protocol", protocol_str);
     print_bool("compress-protocol",compress_protocol);
+#ifdef WITH_SSL
     print_bool("ssl",ssl);
     print_string("ssl-mode",ssl_mode);
     print_string("key",key);
@@ -347,6 +345,7 @@ int main(int argc, char *argv[]) {
     print_string("capath",capath);
     print_string("cipher",cipher);
     print_string("tls-version",tls_version);
+#endif
     print_list("regex",regex_list);
     print_string("source-db",source_db);
 
@@ -361,15 +360,14 @@ int main(int argc, char *argv[]) {
     print_string("pmm-path",pmm_path);
     print_string("pmm-resolution",pmm_resolution);
 
-    print_bool("enable-binlog",enable_binlog);
-    if (!innodb_optimize_keys){
-      print_string("innodb-optimize-keys",SKIP);
-    }else if(innodb_optimize_keys_per_table){
-      print_string("innodb-optimize-keys",AFTER_IMPORT_PER_TABLE);
-    }else if(innodb_optimize_keys_all_tables){
-      print_string("innodb-optimize-keys",AFTER_IMPORT_ALL_TABLES);
+    if (!optimize_keys){
+      print_string("optimize-keys",SKIP);
+    }else if(optimize_keys_per_table){
+      print_string("optimize-keys",AFTER_IMPORT_PER_TABLE);
+    }else if(optimize_keys_all_tables){
+      print_string("optimize-keys",AFTER_IMPORT_ALL_TABLES);
     }else
-      print_string("innodb-optimize-keys",NULL);
+      print_string("optimize-keys",NULL);
 
     print_bool("no-schemas",no_schemas);
 
@@ -509,7 +507,7 @@ int main(int argc, char *argv[]) {
     execute_replication_commands(conn,replication_statements->start_replica_until->str);
   }
 
-  start_connection_pool(conn);
+  start_connection_pool();
   if (disable_redo_log){
     if ((get_major() == 8) && (get_secondary() == 0) && (get_revision() > 21)){
       g_message("Disabling redologs");
@@ -518,8 +516,6 @@ int main(int argc, char *argv[]) {
       m_error("Disabling redologs is not supported for version %d.%d.%d", get_major(), get_secondary(), get_revision());
     }
   }
-
-//  start_connection_pool(conn);
 
   if (database_db){
     if (!no_schemas)
@@ -556,16 +552,13 @@ int main(int argc, char *argv[]) {
   g_async_queue_unref(conf.data_queue);
   conf.data_queue=NULL;
 
-  struct connection_data *cd=close_restore_thread(TRUE);
-  g_mutex_lock(cd->in_use);
-
   if (disable_redo_log)
-    m_query(cd->thrconn, "ALTER INSTANCE ENABLE INNODB REDO_LOG", m_critical, "ENABLE INNODB REDO LOG failed");
+    m_query(conn, "ALTER INSTANCE ENABLE INNODB REDO_LOG", m_critical, "ENABLE INNODB REDO LOG failed");
 
   gboolean checksum_ok=TRUE;
   tl=conf.table_list;
   while (tl != NULL){
-    checksum_ok&=checksum_dbt(tl->data, cd->thrconn);
+    checksum_ok&=checksum_dbt(tl->data, conn);
     tl=tl->next;
   }
 
@@ -576,19 +569,16 @@ int main(int argc, char *argv[]) {
     struct database *d= NULL;
     while (g_hash_table_iter_next(&iter, (gpointer *) &lkey, (gpointer *) &d)) {
       if (d->schema_checksum != NULL && !no_schemas)
-        checksum_ok&=checksum_database_template(d->real_database, d->schema_checksum,  cd->thrconn,
+        checksum_ok&=checksum_database_template(d->real_database, d->schema_checksum, conn,
                                   "Schema create checksum", checksum_database_defaults);
       if (d->post_checksum != NULL && !skip_post)
-        checksum_ok&=checksum_database_template(d->real_database, d->post_checksum,  cd->thrconn,
+        checksum_ok&=checksum_database_template(d->real_database, d->post_checksum, conn,
                                   "Post checksum", checksum_process_structure);
       if (d->triggers_checksum != NULL && !skip_triggers)
-        checksum_ok&=checksum_database_template(d->real_database, d->triggers_checksum,  cd->thrconn,
+        checksum_ok&=checksum_database_template(d->real_database, d->triggers_checksum, conn,
                                   "Triggers checksum", checksum_trigger_structure_from_database);
     }
   }
-  guint i=0;
-  for(i=1;i<num_threads;i++)
-    close_restore_thread(FALSE);
   wait_restore_threads_to_close();
 
   if (!checksum_ok){
@@ -608,17 +598,17 @@ int main(int argc, char *argv[]) {
 
   if (replication_statements->reset_replica){
     g_message("Sending reset replica");
-    execute_replication_commands(cd->thrconn,replication_statements->reset_replica->str);
+    execute_replication_commands(conn,replication_statements->reset_replica->str);
   }
 
   if (replication_statements->change_replication_source){
     g_message("Sending change replication source");
-    execute_replication_commands(cd->thrconn,replication_statements->change_replication_source->str);
+    execute_replication_commands(conn,replication_statements->change_replication_source->str);
   }
 
   if (replication_statements->start_replica){
     g_message("Sending start replica");
-    execute_replication_commands(cd->thrconn,replication_statements->start_replica->str);
+    execute_replication_commands(conn,replication_statements->start_replica->str);
   }
 
   g_async_queue_unref(conf.database_queue);
@@ -630,8 +620,8 @@ int main(int argc, char *argv[]) {
   free_hash(set_session_hash);
   g_hash_table_remove_all(set_session_hash);
   g_hash_table_unref(set_session_hash);
-  execute_gstring(cd->thrconn, set_global_back);
-  mysql_close(cd->thrconn);
+  execute_gstring(conn, set_global_back);
+  mysql_close(conn);
   mysql_thread_end();
   mysql_library_end();
   g_free(directory);
@@ -653,10 +643,6 @@ int main(int argc, char *argv[]) {
 
   stop_signal_thread();
 
-  if (logoutfile) {
-    fclose(logoutfile);
-  }
-
 /*
   GList * tl=g_list_sort(conf.table_list, compare_by_time);
   g_message("Import timings:");
@@ -673,6 +659,11 @@ int main(int argc, char *argv[]) {
   if (key_file)  g_key_file_free(key_file);
   g_remove(fifo_directory);
   g_message("Restore completed");
+
+  if (logoutfile) {
+    fclose(logoutfile);
+  }
+
   return errors ? EXIT_FAILURE : EXIT_SUCCESS;
 }
 

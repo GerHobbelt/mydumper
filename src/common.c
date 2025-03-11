@@ -20,7 +20,8 @@
 #include <errno.h>
 #include <glib.h>
 #include <glib/gstdio.h>
-#include <pcre.h>
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
 #include <stdarg.h>
 #include "regex.h"
 #include "server_detect.h"
@@ -34,6 +35,7 @@ GList *ignore_errors_list=NULL;
 GAsyncQueue *stream_queue = NULL;
 gboolean use_defer= FALSE;
 gboolean check_row_count= FALSE;
+gchar **optimize_key_engines=NULL;
 
 /*
 const char *usr_bin_zstd_cmd[] = {"/usr/bin/zstd", "-c", NULL};
@@ -313,7 +315,7 @@ void load_per_table_info_from_key_file(GKeyFile *kf, struct configuration_per_ta
           }
           if (g_strcmp0(keys[j],"partition_regex") == 0){
             value = g_key_file_get_value(kf,groups[i],keys[j],&error);
-            pcre *r=NULL; 
+            pcre2_code *r=NULL; 
             init_regex( &r, value);
             g_hash_table_insert(cpt->all_partition_regex_per_table, g_strdup(groups[i]), r);
           }
@@ -634,6 +636,9 @@ void m_key_file_merge(GKeyFile *b, GKeyFile *a){
 
 
 void initialize_common_options(GOptionContext *context, const gchar *group){
+  if (!optimize_key_engines)
+    optimize_key_engines=g_strsplit("InnoDB,ROCKSDB", ",", 0);
+
   if (defaults_file == NULL ){ 
     if ( g_file_test(DEFAULTS_FILE, G_FILE_TEST_EXISTS) ){
       defaults_file=g_strdup(DEFAULTS_FILE);
@@ -838,29 +843,41 @@ void m_warning(const char *fmt, ...){
  */
 gchar *filter_sequence_schemas(const gchar *create_table)
 {
-  pcre *re = NULL;
-  const char *error;
-  int erroroffset;
-  int ovector[12] = {0};
+  pcre2_code *re = NULL;
+  int error;
+  PCRE2_SIZE erroroffset;
+//  int ovector[12] = {0};
   gchar *out = g_strdup(create_table);
 
-  re = pcre_compile("(?:nextval|lastval)\\((`.*`\\.(`.*`))\\)",
-                    PCRE_CASELESS | PCRE_MULTILINE, &error, &erroroffset,
-                    NULL);
+//  re = pcre_compile("(?:nextval|lastval)\\((`.*`\\.(`.*`))\\)",
+//                    PCRE_CASELESS | PCRE_MULTILINE, &error, &erroroffset,
+//                    NULL);
+
+  re = pcre2_compile((PCRE2_SPTR)"(?:nextval|lastval)\\((`.*`\\.(`.*`))\\)", PCRE2_ZERO_TERMINATED, PCRE2_CASELESS | PCRE2_MULTILINE, &error,
+                      &erroroffset, NULL);
+
+
   if (!re) {
-    g_critical("Regular expression fail: %s", error);
+    g_critical("Regular expression fail: %d", error);
     // We can safely continue here
   } else {
     int offset = 0;
-    while ((pcre_exec(re, NULL, out, strlen(out), offset, 0, ovector, 12)) > 0) {
-      gchar* tmp = g_new(gchar, strlen(out));
-      size_t tmp_pos = 0;
+
+  pcre2_match_data *match_data = pcre2_match_data_create_from_pattern(re, NULL);
+
+    while ((
+          pcre2_match(re, (PCRE2_SPTR)out, strlen(out), offset, 0, match_data, NULL)
+          //pcre_exec(re, NULL, out, strlen(out), offset, 0, ovector, 12)
+          
+          ) > 0) {
+//      gchar* tmp = g_new(gchar, strlen(out));
+//      size_t tmp_pos = 0;
       /* Positions generated:
        * ovector 0 - 1: nextval(`test`.`s`)
        * ovector 2 - 3: `test`.`s`
        * ovector 4 - 5: `s`
        */
-      size_t write_len = ovector[2];
+/*      size_t write_len = ovector[2];
 
       memcpy(tmp, out, write_len);
       tmp_pos += write_len;
@@ -872,6 +889,7 @@ gchar *filter_sequence_schemas(const gchar *create_table)
       tmp[tmp_pos + write_len] = '\0';
       g_free(out);
       out = tmp;
+      */
     }
   }
   return out;
@@ -900,7 +918,7 @@ gboolean read_data(FILE *file, GString *data,
 
   while (fgets(buffer, sizeof(buffer), file)) {
     l= strlen(buffer);
-    g_assert(l > 0 && l < sizeof(buffer));
+    //g_assert(l > 0 && l < sizeof(buffer));
     g_string_append(data, buffer);
     if (buffer[l - 1] == '\n') {
       (*line)++;
@@ -1173,6 +1191,7 @@ int global_process_create_table_statement (gchar * statement, GString *create_ta
   append_alter_table(alter_table_constraint_statement, real_table);
   int fulltext_counter=0;
   int i=0;
+  gchar *engine_pos=NULL;
   for (i=0; i < (int)g_strv_length(split_file);i++){
     if (split_indexes &&( g_strstr_len(split_file[i],5,"  KEY")
       || g_strstr_len(split_file[i],8,"  UNIQUE")
@@ -1209,7 +1228,14 @@ int global_process_create_table_statement (gchar * statement, GString *create_ta
         g_string_append_c(create_table_statement,'\n');
       }
     }
-    if (g_strrstr(split_file[i],"ENGINE=InnoDB")) flag|=IS_INNODB_TABLE;
+    engine_pos=g_strrstr(split_file[i],"ENGINE=");
+    if (engine_pos){
+      engine_pos+=7;
+      guint j=0;
+      for( j=0; j<g_strv_length(optimize_key_engines); j++)
+        if (g_str_has_prefix(engine_pos, optimize_key_engines[j]))
+          flag|=IS_TRX_TABLE;
+    }
   }
   g_string_replace(create_table_statement,",\n)","\n)", 0);
   finish_alter_table(alter_table_statement);
@@ -1274,7 +1300,13 @@ gchar *build_dbt_key(gchar *a, gchar *b){
 gboolean common_arguments_callback(const gchar *option_name,const gchar *value, gpointer data, GError **error){
   *error=NULL;
   (void) data;
-  if (!strcmp(option_name, "--source-control-command")){
+  if (!strcmp(option_name, "--optimize-keys-engines")){
+    if (value){
+      optimize_key_engines = g_strsplit(value, ",", 0);
+      return TRUE;
+    }
+
+  } else if (!strcmp(option_name, "--source-control-command")){
     if (!strcasecmp(value, "TRADITIONAL")) {
       source_control_command=TRADITIONAL;
       return TRUE;

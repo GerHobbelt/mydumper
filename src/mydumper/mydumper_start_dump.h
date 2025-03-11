@@ -332,9 +332,8 @@ struct db_table {
   struct function_pointer ** anonymized_function;
   gchar *where;
   gchar *limit;
-  gchar *columns_on_select;
   gchar *columns_on_insert;
-  pcre *partition_regex;
+  pcre2_code *partition_regex;
   guint num_threads;
 //  enum chunk_type chunk_type;
   GList *chunks;
@@ -354,6 +353,7 @@ struct db_table {
   guint64 min_chunk_step_size;
   guint64 starting_chunk_step_size;
   guint64 max_chunk_step_size;
+  gboolean is_fixed_length;
 // struct chunk_functions chunk_functions;
   enum db_table_states status;
   guint max_threads_per_table;
