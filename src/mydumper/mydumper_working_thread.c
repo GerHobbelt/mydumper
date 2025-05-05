@@ -38,8 +38,6 @@
 /* Program options */
 gboolean order_by_primary_key = FALSE;
 gboolean use_savepoints = FALSE;
-gboolean clear_dumpdir= FALSE;
-gboolean dirty_dumpdir= FALSE;
 gchar *ignore_engines_str = NULL;
 int skip_tz = 0;
 gboolean dump_events = FALSE;
@@ -66,6 +64,9 @@ struct MList  *non_transactional_table = NULL;
 guint64 min_chunk_step_size = 0;
 guint64 starting_chunk_step_size = 0;
 guint64 max_chunk_step_size = 0;
+gchar *exec_per_thread = NULL;
+const gchar *exec_per_thread_extension = NULL;
+gchar **exec_per_thread_cmd=NULL;
 
 // Static
 static GMutex *init_mutex = NULL;
@@ -130,30 +131,36 @@ void initialize_working_thread(){
 
 // TODO: We need to cleanup this
 
-  if (compress_method==NULL && exec_per_thread==NULL && exec_per_thread_extension == NULL) {
+  if ((exec_per_thread_extension==NULL) && (exec_per_thread != NULL))
+    m_critical("--exec-per-thread-extension needs to be set when --exec-per-thread (%s) is used", exec_per_thread);
+  if ((exec_per_thread_extension!=NULL) && (exec_per_thread == NULL))
+    m_critical("--exec-per-thread needs to be set when --exec-per-thread-extension (%s) is used", exec_per_thread_extension);
+
+  if (compress_method==NULL && exec_per_thread==NULL) {
     exec_per_thread_extension=EMPTY_STRING;
     initialize_file_handler(FALSE);
   }else{
-    if (compress_method!=NULL && (exec_per_thread!=NULL || exec_per_thread_extension!=NULL)){
+    if (compress_method!=NULL && exec_per_thread!=NULL )
       m_critical("--compression and --exec-per-thread are not comptatible");
-    }
-    gchar *cmd=NULL;
-    if ( g_strcmp0(compress_method,GZIP)==0){
-      if ((cmd=get_gzip_cmd()) == NULL){
-        g_error("gzip command not found on any static location, use --exec-per-thread for non default locations");
+    
+    if (compress_method){
+      if ( g_ascii_strcasecmp(compress_method,GZIP)==0){
+        exec_per_thread=g_strdup_printf("%s -c", GZIP);
+        exec_per_thread_extension=GZIP_EXTENSION;
+      }else if (g_ascii_strcasecmp(compress_method,ZSTD)==0){
+        exec_per_thread=g_strdup_printf("%s -c", ZSTD);
+        exec_per_thread_extension=ZSTD_EXTENSION;
       }
-      exec_per_thread=g_strdup_printf("%s -c", cmd);
-      exec_per_thread_extension=GZIP_EXTENSION;
-    }else 
-    if ( g_strcmp0(compress_method,ZSTD)==0){
-      if ( (cmd=get_zstd_cmd()) == NULL ){
-        g_error("zstd command not found on any static location, use --exec-per-thread for non default locations");
-      }
-      exec_per_thread=g_strdup_printf("%s -c", cmd);
-      exec_per_thread_extension=ZSTD_EXTENSION;
     }
     initialize_file_handler(TRUE);
+
+    exec_per_thread_cmd=g_strsplit(exec_per_thread, " ", 0);
+    gchar *tmpcmd=g_find_program_in_path(exec_per_thread_cmd[0]);
+    if (!tmpcmd)
+      m_critical("%s was not found in PATH, use --exec-per-thread for non default locations",exec_per_thread_cmd[0]);
+    exec_per_thread_cmd[0]=tmpcmd;
   }
+
 
   initialize_jobs();
   initialize_chunk();
@@ -610,35 +617,7 @@ void write_replica_info(MYSQL *conn, FILE *file) {
   char *channel_name = NULL;
   const char *gtid_title = NULL;
   guint i;
-  guint isms = 0;
-  MYSQL_RES *rest=NULL;
-  if (get_product() == SERVER_TYPE_MARIADB ){
-    rest=m_store_result(conn, "SELECT @@default_master_connection", m_warning, "Variable @@default_master_connection not found", NULL);
-    if (rest != NULL && mysql_num_rows(rest)) {
-      mysql_free_result(rest);
-      g_message("Multisource slave detected.");
-      isms = 1;
-    }
-  }
-
-  if (isms)
-    m_query_critical(conn, show_all_replicas_status, "Error executing %s", show_all_replicas_status);
-  else
-    m_query_critical(conn, show_replica_status, "Error executing %s", show_replica_status);
-
   guint slave_count=0;
-  slave = mysql_store_result(conn);
-
-  if (!slave || mysql_num_rows(slave) == 0){
-    goto cleanup;
-  }
-  mysql_free_result(slave);
-  g_message("Stopping replica");
-  replica_stopped=!m_query_warning(conn, stop_replica_sql_thread, "Not able to stop replica",NULL);
-  if (source_control_command==AWS){
-    discard_mysql_output(conn);
-  }
-
   if (isms)
     m_query_critical(conn, show_all_replicas_status, "Error executing %s", show_all_replicas_status);
   else
@@ -693,7 +672,7 @@ void write_replica_info(MYSQL *conn, FILE *file) {
     g_warning("Multisource replication found. Do not trust in the exec_master_log_pos as it might cause data inconsistencies. Search 'Replication and Transaction Inconsistencies' on MySQL Documentation");
 
   fflush(file);
-cleanup:
+
   if (slave)
     mysql_free_result(slave);
 }
@@ -1115,6 +1094,8 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
       g_warning("Setting min and start rows per file to 2 on %s", lkey);
     }
     dbt->is_fixed_length=dbt->min_chunk_step_size != 0 && dbt->min_chunk_step_size == dbt->starting_chunk_step_size && dbt->starting_chunk_step_size == dbt->max_chunk_step_size;
+    // We are disabling the file size limit when the user set a specific --rows size
+    dbt->chunk_filesize=dbt->is_fixed_length?0:chunk_filesize;
 
     if ( dbt->min_chunk_step_size==0)
       dbt->min_chunk_step_size=MIN_CHUNK_STEP_SIZE;
@@ -1130,15 +1111,11 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
     dbt->estimated_remaining_steps=1;
     dbt->min=NULL;
     dbt->max=NULL;
-//  dbt->chunk_type_item.chunk_type = UNDEFINED;
-//  dbt->chunk_type_item.chunk_step = NULL;
     dbt->chunks=NULL;
-//  dbt->initial_chunk_step=NULL;
     dbt->load_data_header=NULL;
     dbt->load_data_suffix=NULL;
     dbt->insert_statement=NULL;
     dbt->chunks_mutex=g_mutex_new();
-//  g_mutex_lock(dbt->chunks_mutex);
     dbt->chunks_queue=g_async_queue_new();
     dbt->chunks_completed=g_new(int,1);
     *(dbt->chunks_completed)=0;
@@ -1147,10 +1124,6 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
     if (order_by_primary_key)
       get_primary_key_separated_by_comma(dbt);
     dbt->multicolumn = !use_single_column && g_list_length(dbt->primary_key) > 1;
-
-//  dbt->primary_key = get_primary_key_string(conn, dbt->database->name, dbt->table);
-    dbt->chunk_filesize=chunk_filesize;
-//  create_job_to_determine_chunk_type(dbt, g_async_queue_push, );
 
     gchar *columns_on_select=g_hash_table_lookup(conf_per_table.all_columns_on_select_per_table, lkey);
 

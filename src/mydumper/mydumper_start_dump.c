@@ -64,6 +64,9 @@ GHashTable *all_dbts=NULL;
 char * (*identifier_quote_character_protect)(char *r);
 struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 gboolean replica_stopped = FALSE;
+gboolean merge_dumpdir= FALSE;
+gboolean clear_dumpdir= FALSE;
+gboolean dirty_dumpdir= FALSE;
 
 // static variables
 static GMutex **pause_mutex_per_thread=NULL;
@@ -869,6 +872,41 @@ cleanup:
 }
 */
 
+guint isms = 0;
+static
+void m_stop_replica(MYSQL *conn) {
+  MYSQL_RES *slave = NULL;
+  MYSQL_RES *rest=NULL;
+  if (get_product() == SERVER_TYPE_MARIADB ){
+    rest=m_store_result(conn, "SELECT @@default_master_connection", m_warning, "Variable @@default_master_connection not found", NULL);
+    if (rest != NULL && mysql_num_rows(rest)) {
+      mysql_free_result(rest);
+      g_message("Multisource slave detected.");
+      isms = 1;
+    }
+  }
+
+  if (isms)
+    m_query_critical(conn, show_all_replicas_status, "Error executing %s", show_all_replicas_status);
+  else
+    m_query_critical(conn, show_replica_status, "Error executing %s", show_replica_status);
+
+  slave = mysql_store_result(conn);
+
+  if (!slave || mysql_num_rows(slave) == 0){
+    goto cleanup;
+  }
+  g_message("Stopping replica");
+  replica_stopped=!m_query_warning(conn, stop_replica_sql_thread, "Not able to stop replica",NULL);
+  if (source_control_command==AWS){
+    discard_mysql_output(conn);
+  }
+
+cleanup:
+  if (slave)
+    mysql_free_result(slave);
+}
+
 // Here is where the backup process start
 
 void start_dump() {
@@ -891,9 +929,10 @@ void start_dump() {
   // Initializing process
   if (clear_dumpdir)
     clear_dump_directory(dump_directory);
-  else if (!dirty_dumpdir && !is_empty_dir(dump_directory)) {
-    g_error("Directory is not empty (use --clear or --dirty): %s\n", dump_directory);
+  else if (!(dirty_dumpdir || merge_dumpdir) && !is_empty_dir(dump_directory)) {
+    g_error("Directory is not empty (use --clear, --dirty or --merge): %s\n", dump_directory);
   }
+
   check_num_threads();
   g_message("Using %u dumper threads", num_threads);
   initialize_start_dump();
@@ -939,7 +978,11 @@ void start_dump() {
     metadata_partial_filename= g_strdup_printf("%s/metadata.partial", dump_directory);
   metadata_filename = g_strdup_printf("%s/metadata", dump_directory);
 
-  mdfile = g_fopen(metadata_partial_filename, "w");
+  if (merge_dumpdir)
+   if (g_rename(metadata_filename, metadata_partial_filename))
+     m_critical("We were not able to rename metadata (%s) file to %s",metadata_filename, metadata_partial_filename);
+
+  mdfile = g_fopen(metadata_partial_filename, "a");
   if (!mdfile) {
     m_critical("Couldn't create metadata file %s (%s)", metadata_partial_filename, strerror(errno));
   }
@@ -970,16 +1013,14 @@ void start_dump() {
   g_free(datetimestr);
 
   /* Write dump config into beginning of metadata, stream this first */
-  {
-    g_assert(identifier_quote_character == BACKTICK || identifier_quote_character == DOUBLE_QUOTE);
-    const char *qc= identifier_quote_character == BACKTICK ? "BACKTICK" : "DOUBLE_QUOTE";
-    fprintf(mdfile, "[config]\nquote-character = %s\n", qc);
-    if (load_data || csv )
-      fprintf(mdfile, "local-infile = 1\n");
-    fprintf(mdfile, "\n[myloader_session_variables]");
-    fprintf(mdfile, "\nSQL_MODE=%s /*!40101\n\n", sql_mode);
-    fflush(mdfile);
-  }
+  g_assert(identifier_quote_character == BACKTICK || identifier_quote_character == DOUBLE_QUOTE);
+  const char *qc= identifier_quote_character == BACKTICK ? "BACKTICK" : "DOUBLE_QUOTE";
+  fprintf(mdfile, "[config]\nquote-character = %s\n", qc);
+  if (load_data || csv )
+    fprintf(mdfile, "local-infile = 1\n");
+  fprintf(mdfile, "\n[myloader_session_variables]");
+  fprintf(mdfile, "\nSQL_MODE=%s /*!40101\n\n", sql_mode);
+  fflush(mdfile);
 
   // Initilizing stream backup
   if (stream){
@@ -1000,10 +1041,10 @@ void start_dump() {
     initialize_exec_command();
 
   // Write replica information
-//  if (get_product() != SERVER_TYPE_TIDB) {
-//    if (source_data >=0 )
-//      write_replica_info(conn, mdfile);
-//  }
+  if (get_product() != SERVER_TYPE_TIDB) {
+    if (source_data >=0 )
+      m_stop_replica(conn);
+  }
 
   // Determine the locking mechanisim that is going to be used
   // and send locks to database if needed
@@ -1152,13 +1193,13 @@ void start_dump() {
   if (trx_tables) {
     // Releasing locks as user instructed that all tables are transactional
     g_message("Transactions started, unlocking tables");
-    if (release_global_lock_function)
-      release_global_lock_function(conn);
     if (release_binlog_function != NULL){
       g_async_queue_pop(conf.binlog_ready);
       g_message("Releasing binlog lock");
       release_binlog_function(second_conn);
     }
+    if (release_global_lock_function)
+      release_global_lock_function(conn);
     if (is_mysql_like() && g_async_queue_pop(conf.binlog_ready) && replica_stopped){
       g_message("Starting replica");
       m_query_warning(conn, start_replica_sql_thread, "Not able to start replica", NULL);
@@ -1216,15 +1257,15 @@ void start_dump() {
     for (n = 0; n < num_threads; n++) {
       g_async_queue_pop(conf.unlock_tables);
     }
-    g_message("Non-InnoDB dump complete, releasing global locks");
-    if (release_global_lock_function)
-      release_global_lock_function(conn);
-    g_message("Global locks released");
     if (release_binlog_function != NULL){
       g_async_queue_pop(conf.binlog_ready);
       g_message("Releasing binlog lock");
       release_binlog_function(second_conn);
     }
+    g_message("Non-InnoDB dump complete, releasing global locks");
+    if (release_global_lock_function)
+      release_global_lock_function(conn);
+    g_message("Global locks released");
   }
 
   // At this point, we can start the replica if it was stopped
@@ -1318,7 +1359,8 @@ void start_dump() {
   if (updated_since > 0)
     fclose(nufile);
 
-  g_rename(metadata_partial_filename, metadata_filename);
+  if (g_rename(metadata_partial_filename, metadata_filename))
+    m_critical("We were not able to rename metadata file");
 
   if (stream) {
     stream_queue_push(NULL, g_strdup(metadata_filename));
