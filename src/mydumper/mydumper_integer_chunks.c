@@ -286,6 +286,7 @@ struct chunk_step_item *get_next_integer_chunk(struct db_table *dbt){
             if (new_csi_next){
               csi->deep=csi->deep+1;
               new_csi=clone_chunk_step_item(csi);
+              new_csi->status=ASSIGNED;
               if ( csi->chunk_step->integer_step.is_step_fixed_length ){
                 new_csi->number+=pow(2,csi->deep);
               }
@@ -368,31 +369,29 @@ end:
   return NULL;
 }
 
-void refresh_integer_min_max(MYSQL *conn, struct db_table *dbt, struct chunk_step_item *csi ){
+gboolean refresh_integer_min_max(MYSQL *conn, struct db_table *dbt, struct chunk_step_item *csi ){
   struct integer_step * ics = &(csi->chunk_step->integer_step);
   gchar *query = NULL;
-  MYSQL_ROW row = NULL;
-  MYSQL_RES *minmax = NULL;
   /* Get minimum/maximum */
 
-  mysql_query(conn, query = g_strdup_printf(
+  MYSQL_RES *minmax = m_store_result(conn, query = g_strdup_printf(
                         "SELECT %s MIN(%s%s%s),MAX(%s%s%s) FROM %s%s%s.%s%s%s%s%s",
                         is_mysql_like() ? "/*!40001 SQL_NO_CACHE */": "",
                         identifier_quote_character_str, csi->field, identifier_quote_character_str, identifier_quote_character_str, csi->field, identifier_quote_character_str,
                         identifier_quote_character_str, dbt->database->name, identifier_quote_character_str, identifier_quote_character_str, dbt->table, identifier_quote_character_str,
-                        csi->prefix?" WHERE ":"", csi->prefix?csi->prefix->str:""));
+                        csi->prefix?" WHERE ":"", csi->prefix?csi->prefix->str:""), NULL, "Query to get a new min and max failed", NULL);
   g_free(query);
-  minmax = mysql_store_result(conn);
 
   if (!minmax){
-    return;
+    return FALSE;
   }
-  row = mysql_fetch_row(minmax);
 
-  if (row==NULL || row[0]==NULL){
+  MYSQL_ROW row = mysql_fetch_row(minmax);
+  if (row==NULL || row[0]==NULL || row[1]==NULL){
     mysql_free_result(minmax);
-    return;
+    return FALSE;
   }
+
   if (ics->is_unsigned) {
     guint64 nmin = strtoull(row[0], NULL, 10);
     guint64 nmax = strtoull(row[1], NULL, 10);
@@ -406,39 +405,37 @@ void refresh_integer_min_max(MYSQL *conn, struct db_table *dbt, struct chunk_ste
   }
   csi->include_null=TRUE;
   mysql_free_result(minmax);
+  return TRUE;
 }
 
 
 void update_integer_min(MYSQL *conn, struct db_table *dbt, struct chunk_step_item *csi ){
-//  union chunk_step *cs= tj->chunk_step;
   struct integer_step * ics = &(csi->chunk_step->integer_step);
   gchar *query = NULL;
-  MYSQL_ROW row = NULL;
-  MYSQL_RES *minmax = NULL;
-  /* Get minimum/maximum */
 
   GString *where = g_string_new("");
   update_integer_where_on_gstring(where, FALSE, csi->prefix, csi->field, csi->chunk_step->integer_step.is_unsigned, csi->chunk_step->integer_step.type, FALSE);
 
-  mysql_query(conn, query = g_strdup_printf(
+  MYSQL_RES *min = m_store_result(conn, query = g_strdup_printf(
                         "SELECT %s %s%s%s FROM %s%s%s.%s%s%s WHERE %s ORDER BY %s%s%s ASC LIMIT 1",
                         is_mysql_like() ? "/*!40001 SQL_NO_CACHE */": "",
                         identifier_quote_character_str, csi->field, identifier_quote_character_str,
                         identifier_quote_character_str, dbt->database->name, identifier_quote_character_str, identifier_quote_character_str, dbt->table, identifier_quote_character_str,
-			where->str, 
-                        identifier_quote_character_str, csi->field, identifier_quote_character_str));
+                        where->str, 
+                        identifier_quote_character_str, csi->field, identifier_quote_character_str), NULL, "Query to get a new min failed", NULL);
+  g_string_free(where,TRUE);
   g_free(query);
-  minmax = mysql_store_result(conn);
 
-  if (!minmax){
+  if (!min){
     return;
   }
-  row = mysql_fetch_row(minmax);
+  MYSQL_ROW row = mysql_fetch_row(min);
 
   if (row==NULL || row[0]==NULL){
-    mysql_free_result(minmax);
+    mysql_free_result(min);
     return;
   }
+
   if (ics->is_unsigned) {
     guint64 nmin = strtoull(row[0], NULL, 10);
     ics->type.unsign.min = nmin;
@@ -446,46 +443,42 @@ void update_integer_min(MYSQL *conn, struct db_table *dbt, struct chunk_step_ite
     gint64 nmin = strtoll(row[0], NULL, 10);
     ics->type.sign.min = nmin;
   }
-  mysql_free_result(minmax);
+
+  mysql_free_result(min);
 }
 
 void update_integer_max(MYSQL *conn,struct db_table *dbt, struct chunk_step_item *csi ){
   struct integer_step * ics = &(csi->chunk_step->integer_step);
   gchar *query = NULL;
-  MYSQL_ROW row = NULL;
-  MYSQL_RES *minmax = NULL;
-  /* Get minimum/maximum */
 
   GString *where = g_string_new("");
   update_integer_where_on_gstring(where, FALSE, csi->prefix, csi->field, csi->chunk_step->integer_step.is_unsigned, csi->chunk_step->integer_step.type, FALSE);
 
-  mysql_query(conn, query = g_strdup_printf(
+  MYSQL_RES *max = m_store_result(conn, query = g_strdup_printf(
                         "SELECT %s %s%s%s FROM %s%s%s.%s%s%s WHERE %s ORDER BY %s%s%s DESC LIMIT 1",
                         is_mysql_like() ? "/*!40001 SQL_NO_CACHE */": "",
                         identifier_quote_character_str, csi->field, identifier_quote_character_str,
                         identifier_quote_character_str, dbt->database->name, identifier_quote_character_str, identifier_quote_character_str, dbt->table, identifier_quote_character_str,
                         where->str,
-                        identifier_quote_character_str, csi->field, identifier_quote_character_str));
-  minmax = mysql_store_result(conn);
+                        identifier_quote_character_str, csi->field, identifier_quote_character_str), NULL, "Query to get a new max failed", NULL);
+  g_string_free(where,TRUE);
   g_free(query);
 
-  if (!minmax){
-//    g_message("No middle point");
+  if (!max){
     goto cleanup;
   }
-  row = mysql_fetch_row(minmax);
 
+  MYSQL_ROW row = mysql_fetch_row(max);
   if (row==NULL || row[0]==NULL){
-//    g_message("No middle point");
 cleanup:
-
     if (ics->is_unsigned) {
       ics->type.unsign.max = ics->type.unsign.min;
     }else{
       ics->type.sign.max = ics->type.sign.min;
     }
 
-    mysql_free_result(minmax);
+    if (max)
+      mysql_free_result(max);
     return;
   }
 
@@ -497,7 +490,7 @@ cleanup:
     ics->type.sign.max = nmax;
   }
 
-  mysql_free_result(minmax);
+  mysql_free_result(max);
 }
 
 guint process_integer_chunk_step(struct table_job *tj, struct chunk_step_item *csi){
@@ -517,14 +510,28 @@ guint process_integer_chunk_step(struct table_job *tj, struct chunk_step_item *c
   csi->status = DUMPING_CHUNK;
 
   if (cs->integer_step.check_max && tj->dbt->max_chunk_step_size!=0){
-    g_debug("Thread %d: Updating MAX", td->thread_id);
+    trace("Thread %d: Updating MAX", td->thread_id);
+    if (cs->integer_step.is_unsigned)
+      trace("Thread %d: Updating MAX: %ld", td->thread_id, cs->integer_step.type.unsign.max);
+    else
+      trace("Thread %d: Updating MAX: %ld", td->thread_id, cs->integer_step.type.sign.max);
     update_integer_max(td->thrconn, tj->dbt, csi);
+    if (cs->integer_step.is_unsigned)
+      trace("Thread %d: New MAX: %ld", td->thread_id, cs->integer_step.type.unsign.max);
+    else
+      trace("Thread %d: New MAX: %ld", td->thread_id, cs->integer_step.type.sign.max);
     cs->integer_step.check_max=FALSE;
   }
   if (cs->integer_step.check_min && tj->dbt->max_chunk_step_size!=0){
-    g_debug("Thread %d: Updating MIN", td->thread_id);
+    if (cs->integer_step.is_unsigned)
+      trace("Thread %d: Updating MIN: %ld", td->thread_id, cs->integer_step.type.unsign.min);
+    else
+      trace("Thread %d: Updating MIN: %ld", td->thread_id, cs->integer_step.type.sign.min);
     update_integer_min(td->thrconn, tj->dbt, csi);
-//    g_message("thread: %d New MIN: %ld", td->thread_id, tj->chunk_step->integer_step.nmin);
+    if (cs->integer_step.is_unsigned)
+      trace("Thread %d: New MIN: %ld", td->thread_id, cs->integer_step.type.unsign.min);
+    else
+      trace("Thread %d: New MIN: %ld", td->thread_id, cs->integer_step.type.sign.min);
     cs->integer_step.check_min=FALSE;
   }
 
@@ -538,7 +545,7 @@ guint process_integer_chunk_step(struct table_job *tj, struct chunk_step_item *c
       cs->integer_step.type.unsign.cursor = cs->integer_step.type.unsign.min + cs->integer_step.step - 1;
 
     if (cs->integer_step.type.unsign.cursor < cs->integer_step.type.unsign.min)
-      g_error("integer_step.type.unsign.cursor: %ld  | integer_step.type.unsign.min %ld  | cs->integer_step.type.unsign.max : %ld | cs->integer_step.step %ld", cs->integer_step.type.unsign.cursor, cs->integer_step.type.unsign.min, cs->integer_step.type.unsign.max, cs->integer_step.step);
+      g_error("integer_step.type.unsign.cursor: %"G_GUINT64_FORMAT"  | integer_step.type.unsign.min %"G_GUINT64_FORMAT"  | cs->integer_step.type.unsign.max : %"G_GUINT64_FORMAT" | cs->integer_step.step %ld", cs->integer_step.type.unsign.cursor, cs->integer_step.type.unsign.min, cs->integer_step.type.unsign.max, cs->integer_step.step);
 
     g_assert(cs->integer_step.type.unsign.cursor >= cs->integer_step.type.unsign.min);
   
@@ -551,11 +558,17 @@ guint process_integer_chunk_step(struct table_job *tj, struct chunk_step_item *c
       cs->integer_step.type.sign.cursor = cs->integer_step.type.sign.min + cs->integer_step.step - 1;
  
     if (cs->integer_step.type.sign.cursor < cs->integer_step.type.sign.min)
-      g_error("integer_step.type.sign.cursor: %ld  | integer_step.type.sign.min %ld  | cs->integer_step.type.sign.max : %ld | cs->integer_step.step %ld", cs->integer_step.type.sign.cursor, cs->integer_step.type.sign.min, cs->integer_step.type.sign.max, cs->integer_step.step);
+      g_error("integer_step.type.sign.cursor: %"G_GINT64_FORMAT"  | integer_step.type.sign.min %"G_GINT64_FORMAT"  | cs->integer_step.type.sign.max : %"G_GINT64_FORMAT" | cs->integer_step.step %ld", cs->integer_step.type.sign.cursor, cs->integer_step.type.sign.min, cs->integer_step.type.sign.max, cs->integer_step.step);
  
     g_assert(cs->integer_step.type.sign.cursor >= cs->integer_step.type.sign.min);
     
     cs->integer_step.estimated_remaining_steps=cs->integer_step.step>0?(cs->integer_step.type.sign.max - cs->integer_step.type.sign.cursor) / cs->integer_step.step:1;
+  }
+
+  if (csi->next !=NULL && csi->status==UNSPLITTABLE){
+    // Could be possible that in previous iteration on a multicolumn table, the status changed ot UNSPLITTABLE, but on next iteration could be possible
+    // to splittable, that is why we need to change back to ASSIGNED
+    csi->status=ASSIGNED; 
   }
 
   g_mutex_unlock(csi->mutex);
@@ -567,8 +580,12 @@ guint process_integer_chunk_step(struct table_job *tj, struct chunk_step_item *c
   
 
   if (csi->next !=NULL){
+    // Multi column
     if (csi->next->needs_refresh)
-      refresh_integer_min_max(td->thrconn, tj->dbt, csi->next);
+      if (!refresh_integer_min_max(td->thrconn, tj->dbt, csi->next)){
+        trace("No min and max found");
+        goto update_min;
+      }
 
     csi->next->chunk_functions.process( tj , csi->next);
     csi->next->needs_refresh=TRUE;
@@ -610,18 +627,21 @@ guint process_integer_chunk_step(struct table_job *tj, struct chunk_step_item *c
   }
 
 // Step 5: Updating min
+update_min:
   g_mutex_lock(csi->mutex);
   if (csi->status != COMPLETED)
     csi->status = ASSIGNED;
   if (cs->integer_step.is_unsigned){
     if ( cs->integer_step.type.unsign.cursor+1 < cs->integer_step.type.unsign.min){
       // Overflow
+      trace("Overflow due integer_step.type.unsign.cursor: %"G_GUINT64_FORMAT"  | integer_step.type.unsign.min %"G_GUINT64_FORMAT, cs->integer_step.type.unsign.cursor, cs->integer_step.type.unsign.min);
       cs->integer_step.type.unsign.min=cs->integer_step.type.unsign.max;
       cs->integer_step.type.unsign.max--;
     }else
       cs->integer_step.type.unsign.min=cs->integer_step.type.unsign.cursor+1;
   }else{
     if ( cs->integer_step.type.sign.cursor+1 < cs->integer_step.type.sign.min){
+      trace("Overflow due integer_step.type.unsign.cursor: %"G_GUINT64_FORMAT"  | integer_step.type.unsign.min %"G_GINT64_FORMAT, cs->integer_step.type.sign.cursor, cs->integer_step.type.sign.min);
       cs->integer_step.type.sign.min=cs->integer_step.type.sign.max;
       cs->integer_step.type.sign.max--;
     }else
