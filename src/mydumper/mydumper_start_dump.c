@@ -275,6 +275,11 @@ static
 void detect_sql_mode(MYSQL *conn){
   struct M_ROW *mr = m_store_result_single_row(conn, "SELECT @@SQL_MODE", "Error getting SQL_MODE",NULL);
 
+  if (!mr->res || !mr->row){
+    m_store_result_row_free(mr);
+    return;
+  }
+
   GString *str= g_string_new(NULL);
 
   if (!g_strstr_len(mr->row[0],-1, "NO_AUTO_VALUE_ON_ZERO"))
@@ -968,7 +973,9 @@ void start_dump() {
   {
     g_assert(identifier_quote_character == BACKTICK || identifier_quote_character == DOUBLE_QUOTE);
     const char *qc= identifier_quote_character == BACKTICK ? "BACKTICK" : "DOUBLE_QUOTE";
-    fprintf(mdfile, "[config]\nquote_character = %s\n", qc);
+    fprintf(mdfile, "[config]\nquote-character = %s\n", qc);
+    if (load_data || csv )
+      fprintf(mdfile, "local-infile = 1\n");
     fprintf(mdfile, "\n[myloader_session_variables]");
     fprintf(mdfile, "\nSQL_MODE=%s /*!40101\n\n", sql_mode);
     fflush(mdfile);

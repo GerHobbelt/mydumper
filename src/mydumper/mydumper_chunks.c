@@ -75,7 +75,7 @@ struct chunk_step_item * new_none_chunk_step(){
   return csi;
 }
 
-struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_table *dbt, guint position, GString *prefix, guint64 rows) {
+struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_table *dbt, guint position, GString *prefix) {
   struct chunk_step_item * csi=NULL;
 
   gchar *field=g_list_nth_data(dbt->primary_key, position);
@@ -89,12 +89,10 @@ struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_tabl
                         identifier_quote_character_str, dbt->database->name, identifier_quote_character_str, identifier_quote_character_str, dbt->table, identifier_quote_character_str,
                         where_option || (prefix && prefix->len>0) ? "WHERE" : "", where_option ? where_option : "", where_option && (prefix && prefix->len>0) ? "AND" : "", prefix && prefix->len>0 ? prefix->str : ""),
                         m_message, NULL, "It is NONE with minmax == NULL", NULL);
+//  g_message("Query: %s", query);
   g_free(query);
 
-  if (!mr)
-    return new_none_chunk_step();
-
-  if (!mr->row){
+  if (!mr->res || !mr->row){
     m_store_result_row_free(mr);
     return new_none_chunk_step();
   }
@@ -137,9 +135,11 @@ struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_tabl
         union type type;
 
         if (unsign){
+          trace("Min: %lld | Max %lld", unmin, unmax);
           type.unsign.min=unmin;
           type.unsign.max=unmax;
         }else{
+          trace("Min: %lld | Max %lld", unmin, unmax);
           type.sign.min=nmin;
           type.sign.max=nmax;
         }
@@ -165,8 +165,8 @@ struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_tabl
 
         g_assert(dbt->starting_chunk_step_size>0);
 
-        csi = new_integer_step_item( TRUE, prefix, field, unsign, type, 0, dbt->is_fixed_length, dbt->starting_chunk_step_size, dbt->min_chunk_step_size, dbt->max_chunk_step_size, 0, FALSE, FALSE, NULL, position);
-        determine_if_we_can_go_deeper(dbt,csi, rows);
+        csi = new_integer_step_item( TRUE, prefix, field, unsign, type, 0, dbt->is_fixed_length, dbt->starting_chunk_step_size, dbt->min_chunk_step_size, dbt->max_chunk_step_size, 0, FALSE, FALSE, NULL, position, dbt->multicolumn);
+//        determine_if_we_can_go_deeper(dbt,csi, rows);
 
         if (csi->chunk_step->integer_step.is_step_fixed_length){
           if (csi->chunk_step->integer_step.is_unsigned){
@@ -201,25 +201,27 @@ struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_tabl
 
 
 guint64 get_rows_from_explain(MYSQL * conn, struct db_table *dbt, GString *where, gchar *field){
-  gchar *query = NULL;
-  /* Get minimum/maximum */
-  struct M_ROW *mr = m_store_result_row(conn, query = g_strdup_printf(
+  gchar *query = g_strdup_printf(
                         "EXPLAIN SELECT %s %s%s%s FROM %s%s%s.%s%s%s%s%s",
                         is_mysql_like() ? "/*!40001 SQL_NO_CACHE */": "",
                         field?identifier_quote_character_str:"", field?field:"*", field?identifier_quote_character_str:"",
                         identifier_quote_character_str, dbt->database->name, identifier_quote_character_str, identifier_quote_character_str, dbt->table, identifier_quote_character_str,
-                        where?" WHERE ":"",where?where->str:""), 
-                        m_critical, m_warning, "Failed to execute EXPLAIN", NULL);
+                        where?" WHERE ":"",where?where->str:"");
+  /* Get minimum/maximum */
+  trace("EXPLAIN: %s", query);
+  struct M_ROW *mr = m_store_result_row(conn, query, 
+                        m_critical, m_warning, "Failed to execute EXPLAIN: %s", query);
 
   g_free(query);
-  if (!mr){
+  if (!mr->res || !mr->row){
+    m_store_result_row_free(mr);
     return 0;
   }
 
   guint row_col=-1;
   determine_explain_columns(mr->res, &row_col);
 
-  if (!mr->row || mr->row[row_col]==NULL){
+  if ( mr->row[row_col]==NULL){
     m_store_result_row_free(mr);
     return 0;
   }
@@ -229,22 +231,18 @@ guint64 get_rows_from_explain(MYSQL * conn, struct db_table *dbt, GString *where
   return rows_in_explain;
 }
 
-static
-guint64 get_rows_from_count(MYSQL * conn, struct db_table *dbt)
+guint64 get_rows_from_count(MYSQL * conn, struct db_table *dbt, GString *where)
 {
   char *query= NULL;
 
   struct M_ROW *mr = m_store_result_row(conn, query= g_strdup_printf(
-                        "SELECT %s COUNT(*) FROM %s%s%s.%s%s%s",
+                        "SELECT %s COUNT(*) FROM %s%s%s.%s%s%s%s%s",
                         is_mysql_like() ? "/*!40001 SQL_NO_CACHE */": "",
-                        identifier_quote_character_str, dbt->database->name, identifier_quote_character_str, identifier_quote_character_str, dbt->table, identifier_quote_character_str),
+                        identifier_quote_character_str, dbt->database->name, identifier_quote_character_str, identifier_quote_character_str, dbt->table, identifier_quote_character_str,
+                        where?" WHERE ":"",where?where->str:""),
                         m_critical, m_warning, "Failed to get count", NULL);
   g_free(query);
-  if (!mr){
-    return 0;
-  }
-
-  if (!mr->row || mr->row[0]==NULL){
+  if (!mr->res || !mr->row || mr->row[0]==NULL){
     m_store_result_row_free(mr);
     return 0;
   }
@@ -260,7 +258,7 @@ void set_chunk_strategy_for_dbt(MYSQL *conn, struct db_table *dbt){
   struct chunk_step_item * csi = NULL;
   guint64 rows;
   if (check_row_count) {
-    rows= get_rows_from_count(conn, dbt);
+    rows= get_rows_from_count(conn, dbt, NULL);
   } else
     rows= get_rows_from_explain(conn, dbt, NULL ,NULL);
   g_message("%s.%s has %s%"G_GINT64_FORMAT" rows", dbt->database->name, dbt->table,
@@ -275,7 +273,7 @@ void set_chunk_strategy_for_dbt(MYSQL *conn, struct db_table *dbt){
       csi=new_real_partition_step_item(partitions,0,0);
     }else{
       if (dbt->split_integer_tables) {
-        csi = initialize_chunk_step_item(conn, dbt, 0, NULL, rows);
+        csi = initialize_chunk_step_item(conn, dbt, 0, NULL);
       }else{
         csi = new_none_chunk_step();
       }
