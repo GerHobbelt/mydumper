@@ -532,7 +532,14 @@ echo "    - set_env_vars
     - run: if (( \$(nm ./mydumper | grep -i mysql | grep \" T \" | wc -l) < 50 )); then false; fi
     - run: mkdir -p /tmp/src/mydumper/${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_rpm]}
     - run: cp /tmp/man/mydumper.1.gz /tmp/man/myloader.1.gz mydumper.cnf mydumper myloader /tmp/src/mydumper/${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_rpm]}/
-    - run: ./package/build.sh \${MYDUMPER_VERSION} \${MYDUMPER_REVISION} rpm ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_rpm]} ${all_arch[${arch}_rpm]}"
+    - run: 
+        command: |
+          if [ -z ${CIRCLE_TAG+x} ];
+          then
+            export MYDUMPER_VERSION=\"9.9.9\"
+            export MYDUMPER_REVISION=\"9\"
+          fi
+          ./package/build.sh \${MYDUMPER_VERSION} \${MYDUMPER_REVISION} rpm ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_rpm]} ${all_arch[${arch}_rpm]}"
 echo "    - persist_to_workspace:
          root: /tmp/package
          paths:
@@ -562,7 +569,6 @@ echo "  build_${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_
         type: boolean
         default: false
     
-
     steps:
     - checkout"
 if [ "${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_deb]}" != "${build_man_os}" ]
@@ -592,7 +598,14 @@ echo "    - set_env_vars
               cp man/mydumper.1.gz  man/myloader.1.gz /tmp/man/
     - run: mkdir -p /tmp/src/mydumper/${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_deb]}/etc
     - run: cp /tmp/man/mydumper.1.gz /tmp/man/myloader.1.gz  mydumper.cnf mydumper myloader /tmp/src/mydumper/${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_deb]}/
-    - run: ./package/build.sh \${MYDUMPER_VERSION} \${MYDUMPER_REVISION} deb ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_deb]} ${all_arch[${arch}_deb]}"
+    - run: 
+        command: |
+          if [ -z ${CIRCLE_TAG+x} ];
+          then
+            export MYDUMPER_VERSION=\"9.9.9\"
+            export MYDUMPER_REVISION=\"9\"
+          fi
+          ./package/build.sh \${MYDUMPER_VERSION} \${MYDUMPER_REVISION} deb ${all_os[${os}_0]}_${all_vendors[${vendor}_0]}_${all_arch[${arch}_deb]} ${all_arch[${arch}_deb]}"
 echo '    - persist_to_workspace:
          root: /tmp/package
          paths:
@@ -618,7 +631,7 @@ echo '
     - run:
         command: |
           rm /tmp/package/mydumper.1.gz /tmp/package/myloader.1.gz
-          ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -b "$( cd /tmp/package/; echo -e "MD5s:\n\`\`\`"; md5sum * ;echo -e "\n\`\`\`\nSHA1s:\n\`\`\`"; sha1sum * ; echo -e "\`\`\`\nSHA256s:\n\`\`\`"; sha256sum * ;echo -e "\`\`\`\n" )" -prerelease -draft -delete ${CIRCLE_TAG} /tmp/package'
+          ghr -t ${GITHUB_TOKEN} -u ${CIRCLE_PROJECT_USERNAME} -r ${CIRCLE_PROJECT_REPONAME} -c ${CIRCLE_SHA1} -b "$( cd /tmp/package/; echo -e "MD5s:\n\`\`\`"; md5sum * ;echo -e "\`\`\`\nSHA1s:\n\`\`\`"; sha1sum * ; echo -e "\`\`\`\nSHA256s:\n\`\`\`"; sha256sum * ;echo -e "\`\`\`\n" )" -prerelease -draft -delete ${CIRCLE_TAG} /tmp/package'
 
 echo -n '
   publish-repository:
@@ -709,18 +722,53 @@ echo '
           git update-index --cacheinfo 160000,$(head -2 ../latest_commit | tail -1 | cut -b9-48),repo
           git commit -am "[skip ci] Auto updated submodule references" && git push
 
+  update_repo:
+    docker:
+      - image: mydumper/mydumper-builder-noble
+    steps:
+    - run:
+        command: |
+          git clone https://github.com/mydumper/mydumper.git mydumper
+          cd mydumper
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/mydumper/mydumper.git
+          curl https://github.com/mydumper/mydumper_repo/info/refs?service=git-upload-pack --output ../latest_commit
+          git update-index --cacheinfo 160000,$(head -2 ../latest_commit | tail -1 | cut -b9-48),repo
+          git commit -am "[skip ci] Auto updated submodule references" && git push
+
+
+
+parameters:
+  my_trigger_parameter:
+    type: string
+    default: ""
+
 
 workflows:
   version: 2
+
+  api-update-repo:
+    when: << pipeline.parameters.my_trigger_parameter >>
+    jobs:
+    - update_repo:
+
+  api-update-repo-commit:
+    when: 
+      not: << pipeline.parameters.my_trigger_parameter >>
+    jobs:
+    - update_repo:
+
   mydumper:
     jobs:'
 
 for lc in ${!list_compile[@]}
 do
 echo "    - compile_and_test_mydumper_in_${list_compile[${lc}]}"
-echo '        filters:
-          branches:
-            ignore: /.*/'
+# Decomment next 5 lines if you want to ignore compilation and add : to previous line
+#echo '        filters:
+#          branches:
+#            ignore: /.*/
+#          tags:
+#            only: /^v\d+\.\d+\.\d+-\d+$/'
 done
 
 for lt in ${!list_test[@]}
@@ -728,9 +776,13 @@ do
 echo "    - compile_and_test_mydumper_in_${list_test[${lt}]}:
         test: true
         e: ${list_test[${lt}]}"
-echo '        filters:
-          branches:
-            ignore: /.*/'
+# Decomment next 5 lines if you want to ignore compilation
+#echo '        filters:
+#          branches:
+#            ignore: /.*/
+#          tags:
+#            only: /^v\d+\.\d+\.\d+-\d+$/'
+
 done
 
 for os in ${list_build[@]}
