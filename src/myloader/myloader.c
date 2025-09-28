@@ -70,10 +70,9 @@ guint sequences = 0;
 guint sequences_processed = 0;
 GMutex sequences_mutex;
 gchar *source_db = NULL;
-gchar *purge_mode_str=NULL;
 extern guint errors;
 guint max_errors= 0;
-struct restore_errors detailed_errors = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+struct restore_errors detailed_errors = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 guint max_threads_for_schema_creation=4;
 guint max_threads_for_index_creation=4;
 guint max_threads_for_post_creation= 1;
@@ -143,11 +142,14 @@ void create_database(struct thread_data *td, gchar *database) {
   const gchar *filepath = g_strdup_printf("%s/%s-schema-create.sql%s",
                                             directory, database, exec_per_thread_extension);
 
+  if (drop_database)
+    execute_drop_database(td, database);
   if (g_file_test(filepath, G_FILE_TEST_EXISTS)) {
     g_atomic_int_add(&(detailed_errors.schema_errors), restore_data_from_mydumper_file(td, filename, TRUE, NULL));
   } else {
     GString *data = g_string_new("CREATE DATABASE IF NOT EXISTS ");
     g_string_append_printf(data,"`%s`", database);
+    trace("Creating schema %s", database);
     if (restore_data_in_gstring_extended(td, data , TRUE, NULL, m_critical, "Failed to create database: %s", database) )
       g_atomic_int_inc(&(detailed_errors.schema_errors));
     g_string_free(data, TRUE);
@@ -179,6 +181,8 @@ void print_errors(){
     "- Trigger:   \t%d\n"
     "- Constraint:\t%d\n"
     "- Post:      \t%d\n"
+    "Warnings found:\n"
+    "- Data:\t%d\n"
     "Retries:\t%d",
     detailed_errors.tablespace_errors,
     detailed_errors.schema_errors,
@@ -189,6 +193,7 @@ void print_errors(){
     detailed_errors.trigger_errors,
     detailed_errors.constraints_errors,
     detailed_errors.post_errors,
+    detailed_errors.data_warnings,
     detailed_errors.retries);
 
 
@@ -226,10 +231,9 @@ int main(int argc, char *argv[]) {
 
   if (debug) {
     set_debug();
-    set_verbose(3);
-  } else {
-    set_verbose(verbose);
+    verbose=3;
   }
+  set_verbose(verbose);
 
   if (overwrite_unsafe)
     overwrite_tables= TRUE;
@@ -279,7 +283,6 @@ int main(int argc, char *argv[]) {
       m_critical("Could not create pmm thread");
     }
   }
-//  initialize_job(purge_mode_str);
   initialize_restore_job();
   char *current_dir=g_get_current_dir();
   if (!input_directory) {
@@ -376,7 +379,6 @@ int main(int argc, char *argv[]) {
     print_bool("no-schemas",no_schemas);
 
     print_bool("local-infile", local_infile);
-    print_string("purge-mode",purge_mode_str);
     print_bool("disable-redo-log",disable_redo_log);
     print_string("checksum",checksum_str);
     print_bool("overwrite-tables",overwrite_tables);
@@ -395,7 +397,7 @@ int main(int argc, char *argv[]) {
     print_int("rows",rows);
     print_int("queries-per-transaction",commit_count);
     print_bool("append-if-not-exist",append_if_not_exist);
-    print_string("set-names",set_names_str);
+    print_string("set-names",set_names_in_conn_by_default);
 
     print_bool("skip-definer",skip_definer);
     print_bool("help",help);

@@ -72,7 +72,7 @@ gboolean hex_blob = FALSE;
 
 gboolean update_files_on_table_job(struct table_job *tj)
 {
-  if (tj->rows->file == 0){
+  if (tj->rows->file < 0){
     tj->rows->filename = build_rows_filename(tj->dbt->database->filename, tj->dbt->table_filename, tj->part, tj->sub_part);
     tj->rows->file = m_open(&(tj->rows->filename),"w");
     trace("Thread %d: Filename assigned(%d): %s", tj->td->thread_id, tj->rows->file, tj->rows->filename);
@@ -89,19 +89,25 @@ gboolean update_files_on_table_job(struct table_job *tj)
 
 void message_dumping_data_short(struct table_job *tj){
   g_mutex_lock(transactional_table->mutex);
+  guint transactional_table_size = g_list_length(transactional_table->list);
+  g_mutex_unlock(transactional_table->mutex);
   g_mutex_lock(non_transactional_table->mutex);
+  guint non_transactional_table_size = g_list_length(non_transactional_table->list);
+  g_mutex_unlock(non_transactional_table->mutex);
   g_message("Thread %d: %s%s%s.%s%s%s [ %"G_GINT64_FORMAT"%% ] | Tables: %u/%u",
                     tj->td->thread_id,
                     identifier_quote_character_str, masquerade_filename?tj->dbt->database->filename:tj->dbt->database->name, identifier_quote_character_str,
                     identifier_quote_character_str, masquerade_filename?tj->dbt->table_filename:tj->dbt->table, identifier_quote_character_str,
-                    tj->dbt->rows_total!=0?100*tj->dbt->rows/tj->dbt->rows_total:0, g_list_length(transactional_table->list)+g_list_length(non_transactional_table->list),g_hash_table_size(all_dbts));
-  g_mutex_unlock(transactional_table->mutex);
-  g_mutex_unlock(non_transactional_table->mutex);
+                    tj->dbt->rows_total!=0?100*tj->dbt->rows/tj->dbt->rows_total:0, non_transactional_table_size+transactional_table_size, g_hash_table_size(all_dbts));
 }
 
 void message_dumping_data_long(struct table_job *tj){
   g_mutex_lock(transactional_table->mutex);
+  guint transactional_table_size = g_list_length(transactional_table->list);
+  g_mutex_unlock(transactional_table->mutex);
   g_mutex_lock(non_transactional_table->mutex);
+  guint non_transactional_table_size = g_list_length(non_transactional_table->list);
+  g_mutex_unlock(non_transactional_table->mutex);
   g_message("Thread %d: dumping data from %s%s%s.%s%s%s%s%s%s%s%s%s%s%s%s%s into %s | Completed: %"G_GINT64_FORMAT"%% | Remaining tables: %u / %u",
                     tj->td->thread_id,
                     identifier_quote_character_str, masquerade_filename?tj->dbt->database->filename:tj->dbt->database->name, identifier_quote_character_str, 
@@ -111,9 +117,7 @@ void message_dumping_data_long(struct table_job *tj){
                      (tj->where->len && where_option )                    ? " AND "   : "" ,   where_option ?   where_option : "",
                     ((tj->where->len || where_option ) && tj->dbt->where) ? " AND "   : "" , tj->dbt->where ? tj->dbt->where : "",
                     order_by_primary_key && tj->dbt->primary_key_separated_by_comma ? " ORDER BY " : "", order_by_primary_key && tj->dbt->primary_key_separated_by_comma ? tj->dbt->primary_key_separated_by_comma : "",
-                    tj->rows->filename, tj->dbt->rows_total!=0?100*tj->dbt->rows/tj->dbt->rows_total:0, g_list_length(transactional_table->list)+g_list_length(non_transactional_table->list),g_hash_table_size(all_dbts));
-  g_mutex_unlock(transactional_table->mutex);
-  g_mutex_unlock(non_transactional_table->mutex);
+                    tj->rows->filename, tj->dbt->rows_total!=0?100*tj->dbt->rows/tj->dbt->rows_total:0, non_transactional_table_size+transactional_table_size,g_hash_table_size(all_dbts));
 }
 
 void (*message_dumping_data)(struct table_job *tj);
@@ -419,7 +423,7 @@ gboolean write_data(int file, GString *data) {
 }
 
 void initialize_load_data_statement_suffix(struct db_table *dbt, MYSQL_FIELD * fields, guint num_fields){
-  gchar *character_set=set_names_str != NULL ? set_names_str : dbt->character_set /* "BINARY"*/;
+  gchar *character_set=set_names_in_conn_by_default != NULL ? set_names_in_conn_by_default : dbt->character_set /* "BINARY"*/;
   GString *load_data_suffix=g_string_sized_new(statement_size);
   g_string_append_printf(load_data_suffix, "%s' INTO TABLE %s%s%s ", exec_per_thread_extension, identifier_quote_character_str, dbt->table, identifier_quote_character_str);
   if (character_set && strlen(character_set)!=0)
@@ -453,7 +457,7 @@ void initialize_load_data_statement_suffix(struct db_table *dbt, MYSQL_FIELD * f
 }
 
 void initialize_clickhouse_statement_suffix(struct db_table *dbt, MYSQL_FIELD * fields, guint num_fields){
-  gchar *character_set=set_names_str != NULL ? set_names_str : dbt->character_set /* "BINARY"*/;
+  gchar *character_set=set_names_in_conn_by_default != NULL ? set_names_in_conn_by_default : dbt->character_set /* "BINARY"*/;
   dbt->load_data_suffix=g_string_sized_new(statement_size);
   g_string_append_printf(dbt->load_data_suffix, "%s' INTO TABLE %s%s%s ", exec_per_thread_extension, identifier_quote_character_str, dbt->table, identifier_quote_character_str);
   if (character_set && strlen(character_set)!=0)
@@ -535,34 +539,6 @@ gboolean write_header(struct table_job * tj){
     return FALSE;
   }
   return TRUE;
-}
-
-/*
-guint64 get_estimated_remaining_chunks_on_dbt(struct db_table *dbt){
-  GList *l=dbt->chunks;
-  guint64 total=0;
-  while (l!=NULL){
-    total+=((union chunk_step *)(l->data))->integer_step.estimated_remaining_steps;
-    l=l->next;
-  }
-  return total;
-}
-*/
-
-guint64 get_estimated_remaining_of(struct MList *mlist){
-  g_mutex_lock(mlist->mutex);
-  GList *tl=mlist->list;
-  guint64 total=0;
-  while (tl!=NULL){
-    total+=((struct db_table *)(tl->data))->estimated_remaining_steps;
-    tl=tl->next;
-  }
-  g_mutex_unlock(mlist->mutex);
-  return total;
-}
-
-guint64 get_estimated_remaining_of_all_chunks(){
-  return get_estimated_remaining_of(non_transactional_table) + get_estimated_remaining_of(transactional_table);
 }
 
 void write_load_data_column_into_string( MYSQL *conn, gchar **column, MYSQL_FIELD field, gulong length, struct thread_data_buffers buffers){
@@ -660,14 +636,11 @@ void update_dbt_rows(struct db_table * dbt, guint64 num_rows){
 }
 
 void close_file(struct table_job * tj, struct table_job_file *tjf){
-  if (tjf->file!=0){
+  if (tjf->file >= 0){
     m_close(tj->td->thread_id, tjf->file, tjf->filename, 1, tj->dbt);
-    tjf->file=0;
+    tjf->file=-1;
     g_free(tjf->filename);
     tjf->filename=NULL;
-  }else{
-    g_message("Not closing file: %d %s", tjf->file, tjf->filename);
-  
   }
 }
 
@@ -739,7 +712,7 @@ void write_result_into_file(MYSQL *conn, MYSQL_RES *result, struct table_job * t
       }
 	  	break;
     case CLICKHOUSE:
-      if (tj->rows->file == 0){
+      if (tj->rows->file < 0){
         update_files_on_table_job(tj);
       }
 			if (dbt->load_data_suffix==NULL){
@@ -761,7 +734,7 @@ void write_result_into_file(MYSQL *conn, MYSQL_RES *result, struct table_job * t
       g_string_append(tj->td->thread_data_buffers.statement, dbt->insert_statement->str);
       break;
 		case SQL_INSERT:
-      if (tj->rows->file == 0){
+      if (tj->rows->file < 0){
         update_files_on_table_job(tj);
   		}
       if (dbt->insert_statement==NULL){
@@ -856,6 +829,11 @@ void write_result_into_file(MYSQL *conn, MYSQL_RES *result, struct table_job * t
     }
 		tj->st_in_file++;
   }
+  if (from)
+    g_date_time_unref(from);
+  if (to)
+    g_date_time_unref(to);
+
 //  g_string_free(statement, TRUE);
 //  g_string_free(escaped, TRUE);
 //  g_string_free(statement_row, TRUE);	

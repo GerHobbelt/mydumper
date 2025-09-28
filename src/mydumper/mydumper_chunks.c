@@ -68,6 +68,7 @@ void initialize_chunk_step_as_none(struct chunk_step_item * csi){
   csi->part=0;
   csi->chunk_type=NONE;
   csi->chunk_functions.process=&process_none_chunk;
+  csi->chunk_functions.free=NULL;
   csi->chunk_step = NULL;
 }
 
@@ -142,19 +143,19 @@ struct chunk_step_item * initialize_chunk_step_item (MYSQL *conn, struct db_tabl
         }
         guint64 _starting_chunk_step_size=0;
         guint percentage_of_fragmentation = diff_btwn_max_min / rows;
-        g_message("percentage_of_fragmentation of `%s`.`%s` %f", dbt->database->name, dbt->table, log(percentage_of_fragmentation ));
+        trace("percentage_of_fragmentation of `%s`.`%s` %f", dbt->database->name, dbt->table, log(percentage_of_fragmentation ));
         if (dbt->starting_chunk_step_size == 0){
 
           _starting_chunk_step_size= dbt->max_chunk_step_size!=0 ?
                                              (rows/num_threads>dbt->max_chunk_step_size?
                                                dbt->max_chunk_step_size:
-                                               rows/num_threads):
-//                                               rows/((log(percentage_of_fragmentation )+1)*num_threads)):
-                                                rows/num_threads;
-//                                             rows/((log(percentage_of_fragmentation )+1)*num_threads);
+ //                                              rows/num_threads):
+                                               rows/((log(percentage_of_fragmentation )+1)*num_threads)):
+ //                                               rows/num_threads;
+                                             rows/((log(percentage_of_fragmentation )+1)*num_threads);
           if (dbt->max_chunk_step_size==0)
-            max_chunk_step_size=rows/num_threads;
-            //            max_chunk_step_size=rows/((log(percentage_of_fragmentation )+1)*num_threads);
+//            max_chunk_step_size=rows/num_threads;
+            max_chunk_step_size=diff_btwn_max_min/((log(percentage_of_fragmentation )+1)*num_threads);
         }
         if (_starting_chunk_step_size < dbt->min_chunk_step_size)
           _starting_chunk_step_size=dbt->min_chunk_step_size;
