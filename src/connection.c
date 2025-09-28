@@ -164,7 +164,7 @@ void check_capath(const char *path) {
 static
 void m_options(MYSQL *conn, enum mysql_option option, gboolean arg_b, const void *arg_v){
   if (arg_b){
-    if ( mysql_options(conn, option, &arg_v))
+    if ( mysql_options(conn, option, arg_v))
        m_error("mysql_options() failed: %s\n", mysql_error(conn));
   }
 }
@@ -326,7 +326,7 @@ void m_connect(MYSQL *conn){
   print_connection_details_once();
 
 //  if (set_names_statement)
-    m_query_warning(conn, set_names_statement, "Not able to execute SET NAMES statement", NULL);
+    m_query_warning(conn, set_names_statement, "Not able to execute SET NAMES statement at connect", NULL);
 }
 
 void hide_password(int argc, char *argv[]){
