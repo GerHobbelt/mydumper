@@ -961,8 +961,12 @@ void start_dump() {
 
   if (disk_limits!=NULL){
     conf.pause_resume = g_async_queue_new();
-    disk_check_thread = m_thread_new("monitor",monitor_disk_space_thread, conf.pause_resume, "Monitor thread could not be created");
+    disk_check_thread = m_thread_new("mon_disk",monitor_disk_space_thread, conf.pause_resume, "Monitor thread could not be created");
   }
+
+//  GThread *throttling_thread = 
+  if (throttle_variable)
+    m_thread_new("mon_thro",monitor_throttling_thread, NULL, "Monitor throttling thread could not be created");
 
   // signal_thread is disable if daemon mode
   if (!daemon_mode)
