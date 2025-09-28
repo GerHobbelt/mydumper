@@ -37,7 +37,7 @@ GList *ignore_errors_list=NULL;
 GAsyncQueue *stream_queue = NULL;
 gboolean use_defer= FALSE;
 gboolean check_row_count= FALSE;
-gchar **optimize_key_engines=NULL;
+extern gchar **optimize_key_engines;
 guint throttle_time=0;
 guint throttle_max_usleep_limit=60000000;
 
@@ -72,6 +72,10 @@ void initialize_set_names(){
 
   if (!set_names_in_file_for_sct)
     set_names_in_file_for_sct=set_names_in_file_by_default;
+}
+
+gchar *set_names_statement_template(gchar *_set_names){
+  return g_strdup_printf("/*!40101 SET NAMES %s*/", _set_names);
 }
 
 void free_set_names(){
@@ -1259,7 +1263,7 @@ void parse_object_to_export(struct object_to_export *object_to_export,gchar *val
 gchar *build_dbt_key(gchar *a, gchar *b){
   return g_strdup_printf("%c%s%c.%c%s%c", identifier_quote_character, a, identifier_quote_character, identifier_quote_character, b, identifier_quote_character);
 }
-
+/*
 gboolean common_arguments_callback(const gchar *option_name,const gchar *value, gpointer data, GError **error){
   *error=NULL;
   (void) data;
@@ -1309,7 +1313,7 @@ gboolean common_arguments_callback(const gchar *option_name,const gchar *value, 
   }
   return FALSE;
 }
-
+*/
 void discard_mysql_output(MYSQL *conn){
   MYSQL_RES *result = NULL;
   MYSQL_ROW row = NULL;
@@ -1454,6 +1458,12 @@ struct M_ROW* m_store_result_single_row(MYSQL *conn, const gchar *query, const c
 void m_store_result_row_free(struct M_ROW* mr){
   mysql_free_result(mr->res);
   g_free(mr);
+}
+
+void execute_set_names(MYSQL *conn, gchar *_set_names){
+  gchar *_set_names_statement=set_names_statement_template(_set_names); 
+  m_query_warning(conn, _set_names_statement, "Not able to execute SET NAMES statement", NULL);
+  g_free(_set_names_statement);
 }
 
 GThread * m_thread_new(const gchar* title, GThreadFunc func, gpointer data, const gchar* error_text){

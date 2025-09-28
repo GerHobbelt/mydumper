@@ -215,7 +215,6 @@ void initialize_conf_per_table(struct configuration_per_table *cpt);
 void parse_object_to_export(struct object_to_export *object_to_export,gchar *val);
 gchar *build_dbt_key(gchar *a, gchar *b);
 
-gboolean common_arguments_callback(const gchar *option_name,const gchar *value, gpointer data, GError **error);
 void discard_mysql_output(MYSQL *conn);
 gboolean m_query(  MYSQL *conn, const gchar *query, void log_fun(const char *, ...) , const char *fmt, ...);
 gboolean m_query_verbose(MYSQL *conn, const char *q, void log_fun(const char *, ...) , const char *fmt, ...);
@@ -231,3 +230,5 @@ gboolean create_dir(gchar *directory);
 gchar *build_tmp_dir_name();
 GThread * m_thread_new(const gchar* title, GThreadFunc func, gpointer data, const gchar* error_text);
 void *monitor_throttling_thread (void *queue);
+gchar *set_names_statement_template(gchar *_set_names);
+void execute_set_names(MYSQL *conn, gchar *_set_names);

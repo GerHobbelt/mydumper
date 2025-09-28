@@ -329,7 +329,7 @@ regex_error:
             if (flag & IS_TRX_TABLE){
               if (flag & IS_ALTER_TABLE_PRESENT){
 //                finish_alter_table(alter_table_statement);
-                g_message("Fast index creation will be use for table: %s.%s",dbt->database->real_database,dbt->real_table);
+                g_message("Fast index creation will be used for table: %s.%s",dbt->database->real_database,dbt->real_table);
               }else{
                 g_string_free(alter_table_statement,TRUE);
                 alter_table_statement=NULL;
@@ -666,8 +666,10 @@ void process_metadata_global(const char *file, GOptionContext * local_context)
           database->triggers_checksum=get_value(kf,group,"triggers_checksum");
         }
       }
-    }else if (g_str_has_prefix(group,"replication") || g_strstr_len(group,6,"master") || g_strstr_len(group,6,"source")){
-      change_master(kf, group, replication_statements);
+    }else if (g_strstr_len(group,6,"master") || g_strstr_len(group,6,"source")){
+      change_master(kf, group, replication_statements, &source_data);
+    }else if (g_str_has_prefix(group,"replication")){
+      change_master(kf, group, replication_statements, &replica_data);
     }else if (g_strstr_len(group, 26,"myloader_session_variables")){
       g_message("myloader_session_variables found on metadata");
       load_hash_of_all_variables_perproduct_from_key_file(kf,set_session_hash,"myloader_session_variables");
@@ -677,6 +679,9 @@ void process_metadata_global(const char *file, GOptionContext * local_context)
     }
     g_free(group);
   }
+
+  if (stream)
+    metadata_has_been_processed();
 
   m_remove(directory, file);
 }
