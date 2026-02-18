@@ -153,6 +153,8 @@ void start_working_thread(struct configuration *conf ){
     thread_data[n].thread_data_buffers.row = g_string_sized_new(statement_size);
     thread_data[n].thread_data_buffers.column = g_string_sized_new(statement_size);
     thread_data[n].thread_data_buffers.escaped = g_string_sized_new(statement_size);
+    thread_data[n].thread_data_buffers.target_column = thread_data[n].thread_data_buffers.column;
+    thread_data[n].thread_data_buffers.column_mask = g_string_sized_new(statement_size);
     threads[n] =
         m_thread_new("data", (GThreadFunc)working_thread, &thread_data[n], "Data thread could not be created");
   }
@@ -451,6 +453,7 @@ void check_connection_status(struct thread_data *td){
 
 
 void get_binlog_position(MYSQL *conn, char **masterlog, char **masterpos, char **mastergtid){
+  trace("Getting binary log position");
   struct M_ROW *mr = m_store_result_row(conn, show_binary_log_status, m_warning, m_message, "Couldn't get master position", NULL);
   if ( mr->row ) {
     *masterlog = g_strdup(mr->row[0]);
@@ -811,6 +814,7 @@ void *working_thread(struct thread_data *td) {
       // Sending LOCK TABLE over all non-transactional tables
       if (td->conf->lock_tables_statement!=NULL){
         g_message("Thread %d: Locking non-transactional tables", td->thread_id);
+        trace("Thread %d: sending: %s", td->thread_id, td->conf->lock_tables_statement->str);
         m_query_critical(td->thrconn, td->conf->lock_tables_statement->str, "Error locking non-transactional tables", NULL);
       }
 

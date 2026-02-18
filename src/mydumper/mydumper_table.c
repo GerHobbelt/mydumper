@@ -160,6 +160,19 @@ gchar *get_character_set_from_collation(MYSQL *conn, gchar *collation){
     if (mr->row)
       g_hash_table_insert(character_set_hash, g_strdup(collation), character_set=g_strdup(mr->row[0]));
     m_store_result_row_free(mr);
+
+    if (!character_set){
+      query =
+        g_strdup_printf("SELECT CHARACTER_SET_NAME FROM INFORMATION_SCHEMA.COLLATION_CHARACTER_SET_APPLICABILITY "
+                      "WHERE full_collation_name='%s'",
+                      collation);
+      mr = m_store_result_row(conn, query, m_critical, m_warning, "Failed to get CHARACTER_SET from collation %s", collation);
+      g_free(query);
+      if (mr->row)
+        g_hash_table_insert(character_set_hash, g_strdup(collation), character_set=g_strdup(mr->row[0]));
+      m_store_result_row_free(mr);
+    }
+
   }
   g_mutex_unlock(character_set_hash_mutex);
   return character_set;
@@ -334,6 +347,34 @@ gboolean has_json_fields(MYSQL *conn, char *database, char *table) {
   return FALSE;
 }
 
+static
+void replace_select_fields(GString * select_fields,GHashTable *column_replace_hash){
+  if (column_replace_hash){
+    gchar **select_fields_list=g_strsplit(select_fields->str, ",", 0);
+    g_string_set_size(select_fields,0);
+    guint i=0;
+    gchar *val=NULL;
+    for(i=0; i< g_strv_length(select_fields_list);i++){
+      if (i>0)
+        g_string_append_c(select_fields,',');
+      val=g_hash_table_lookup(column_replace_hash, select_fields_list[i]);
+      if (val)
+        g_string_append_printf(select_fields,"%s AS %s",val,select_fields_list[i]);
+      else
+        g_string_append(select_fields,select_fields_list[i]);
+    }
+  }
+}
+
+void * m_coalesce_hash(GHashTable * ht, gchar * db_table_key, gchar* any_db_key, gchar *any_table_key ){
+  void * r = g_hash_table_lookup(ht, db_table_key);
+  if (r) return r;
+  r = g_hash_table_lookup(ht, any_db_key);
+  if (r) return r;
+  r = g_hash_table_lookup(ht, any_table_key);
+  return r;
+}
+
 gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *conf,
                       struct database *database, char *table, char *table_collation,
                       gboolean is_sequence, gboolean is_view)
@@ -347,6 +388,9 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
     b=FALSE;
     g_mutex_unlock(all_dbts_mutex);
   }else{
+    gchar * config_file_dbt_key = build_config_file_dbt_key(database->source_database,table);
+    gchar * any_db_config_file_dbt_key = build_config_file_dbt_key("",table);
+    gchar * any_table_config_file_dbt_key = build_config_file_dbt_key(database->source_database,"");
     dbt = g_new(struct db_table, 1);
     dbt->key=lkey;
     dbt->status = UNDEFINED;
@@ -368,16 +412,16 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
     dbt->rows_lock= g_mutex_new();
     dbt->rows_total=0;
     dbt->escaped_table = escape_string(conn,dbt->table);
-    dbt->where=g_hash_table_lookup(conf_per_table.all_where_per_table, lkey);
-    dbt->limit=g_hash_table_lookup(conf_per_table.all_limit_per_table, lkey);
-    parse_object_to_export(&(dbt->object_to_export),g_hash_table_lookup(conf_per_table.all_object_to_export, lkey));
+    dbt->where=m_coalesce_hash(conf_per_table.all_where_per_table, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key);
+    dbt->limit=m_coalesce_hash(conf_per_table.all_limit_per_table, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key);
+    parse_object_to_export(&(dbt->object_to_export), m_coalesce_hash(conf_per_table.all_object_to_export, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key));
 
-    dbt->partition_regex=g_hash_table_lookup(conf_per_table.all_partition_regex_per_table, lkey);
+    dbt->partition_regex=m_coalesce_hash(conf_per_table.all_partition_regex_per_table, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key);
     dbt->max_threads_per_table=max_threads_per_table;
     dbt->current_threads_running=0;
 
     // Load chunk step size values
-    gchar *rows_p_chunk=g_hash_table_lookup(conf_per_table.all_rows_per_table, lkey);
+    gchar *rows_p_chunk=m_coalesce_hash(conf_per_table.all_rows_per_table, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key);
     if (rows_p_chunk )
       dbt->split_integer_tables=parse_rows_per_chunk(rows_p_chunk, &(dbt->min_chunk_step_size), &(dbt->starting_chunk_step_size), &(dbt->max_chunk_step_size),"Invalid option on rows in configuration file");
     else{
@@ -405,7 +449,8 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
       dbt->min_chunk_step_size=min_integer_chunk_step_size;
 
 
-    dbt->num_threads=g_hash_table_lookup(conf_per_table.all_num_threads_per_table, lkey)?strtoul(g_hash_table_lookup(conf_per_table.all_num_threads_per_table, lkey), NULL, 10):num_threads;
+    void *tmp= m_coalesce_hash(conf_per_table.all_num_threads_per_table, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key);
+    dbt->num_threads=tmp?strtoul(tmp, NULL, 10):num_threads;
     dbt->estimated_remaining_steps=1;
     dbt->min=NULL;
     dbt->max=NULL;
@@ -423,11 +468,13 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
       get_primary_key_separated_by_comma(dbt);
     dbt->multicolumn = !use_single_column && g_list_length(dbt->primary_key) > 1;
 
-    gchar *columns_on_select=g_hash_table_lookup(conf_per_table.all_columns_on_select_per_table, lkey);
+    gchar *columns_on_select=m_coalesce_hash(conf_per_table.all_columns_on_select_per_table, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key);
 
-    dbt->columns_on_insert=g_hash_table_lookup(conf_per_table.all_columns_on_insert_per_table, lkey);
+    dbt->columns_on_insert=m_coalesce_hash(conf_per_table.all_columns_on_insert_per_table, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key);
 
     dbt->select_fields=NULL;
+
+    GHashTable *column_replace_hash = m_coalesce_hash(conf_per_table.all_columns_on_select_replace_per_table, config_file_dbt_key, any_db_config_file_dbt_key, any_table_config_file_dbt_key);
 
     if (columns_on_select){
       dbt->select_fields=g_string_new(columns_on_select);
@@ -437,13 +484,17 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
 
     }else if (!dbt->columns_on_insert){
       dbt->complete_insert = complete_insert || detect_generated_fields(conn, dbt->database->source_database_escaped, dbt->escaped_table);
-      if (dbt->complete_insert) {
+      if (dbt->complete_insert || column_replace_hash) {
+//        trace("Complete insert detecting on %s", lkey);
         dbt->select_fields = get_selectable_fields(conn, dbt->database->source_database_escaped, dbt->escaped_table);
       }
     }
 
+    replace_select_fields(dbt->select_fields, column_replace_hash);
+
+
 //    dbt->anonymized_function=get_anonymized_function_for(conn, dbt);
-    dbt->anonymized_function=NULL;
+    dbt->anonymized_function=g_hash_table_new(g_str_hash, g_str_equal);
     dbt->indexes_checksum=NULL;
     dbt->data_checksum=NULL;
     dbt->schema_checksum=NULL;
@@ -451,6 +502,9 @@ gboolean new_db_table(struct db_table **d, MYSQL *conn, struct configuration *co
     dbt->rows=0;
  // dbt->chunk_functions.process=NULL;
     b=TRUE;
+    g_free(config_file_dbt_key);
+    g_free(any_db_config_file_dbt_key);
+    g_free(any_table_config_file_dbt_key);
   }
   *d=dbt;
   return b;

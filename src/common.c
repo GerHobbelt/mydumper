@@ -192,15 +192,20 @@ void load_per_table_info_from_key_file(GKeyFile *kf, struct configuration_per_ta
   gchar *value=NULL;
   gchar **keys=NULL;
   for (i=0; i < len; i++){
-    if (g_strstr_len(groups[i],strlen(groups[i]),"`.`") && g_str_has_prefix(groups[i],"`") && g_str_has_suffix(groups[i],"`")){
-      ht=g_hash_table_new ( g_str_hash, g_str_equal );
+    if (g_str_has_prefix(groups[i],"`") && g_strstr_len(groups[i],strlen(groups[i]),"`.`") &&  g_str_has_suffix(groups[i],"`")){
+      ht=g_hash_table_new_full ( g_str_hash, g_str_equal, g_free, NULL );
       keys=g_key_file_get_keys(kf,groups[i], &len2, &error);
       for (j=0; j < len2; j++){
         if (keys[j][0]== '`' && keys[j][strlen(keys[j])-1]=='`'){
+          // keys contains a masquerade column
           if (init_function_pointer){
             value = g_key_file_get_value(kf,groups[i],keys[j],&error);
             struct function_pointer *fp = init_function_pointer(value);
-            g_hash_table_insert(ht,g_strndup(keys[j]+1,strlen(keys[j])-2), fp);
+            gchar *column_key=g_strndup(keys[j]+1,strlen(keys[j])-2);
+            GList *column_key_list = g_hash_table_lookup(ht, column_key);
+            column_key_list=g_list_append(column_key_list,fp);
+            trace("Inserting function into %s in %s", groups[i], keys[j]);
+            g_hash_table_insert(ht,column_key, column_key_list);
 					}
         }else{
           if (g_strcmp0(keys[j],"where") == 0){
@@ -218,6 +223,22 @@ void load_per_table_info_from_key_file(GKeyFile *kf, struct configuration_per_ta
           if (g_strcmp0(keys[j],"columns_on_select") == 0){
             value = g_key_file_get_value(kf,groups[i],keys[j],&error);
             g_hash_table_insert(cpt->all_columns_on_select_per_table, g_strdup(groups[i]), g_strdup(value));
+          }
+          if (g_strcmp0(keys[j],"columns_on_select_replace") == 0){
+            value = g_key_file_get_value(kf,groups[i],keys[j],&error);
+            gchar **value_list=g_strsplit(value,",`",0);
+            guint ii=0;
+            GHashTable *column_replace_hash=g_hash_table_new ( g_str_hash, g_str_equal );
+            for(ii=0; ii< g_strv_length(value_list);ii++){
+              gchar **kv=g_strsplit(value_list[ii],":",2);
+              if (ii>0)
+                g_hash_table_insert(column_replace_hash, g_strdup_printf("%c%s",'`',kv[0]), g_strdup(kv[1]));
+              else
+                g_hash_table_insert(column_replace_hash, g_strdup(kv[0]), g_strdup(kv[1]));
+              g_strfreev(kv);
+            }
+            g_hash_table_insert(cpt->all_columns_on_select_replace_per_table, g_strdup(groups[i]), column_replace_hash);
+            g_strfreev(value_list);
           }
           if (g_strcmp0(keys[j],"columns_on_insert") == 0){
             value = g_key_file_get_value(kf,groups[i],keys[j],&error);
@@ -1189,9 +1210,11 @@ void print_list(const char*_key, GList *list){
 }
 
 void append_alter_table(GString * alter_table_statement, char *table){
-  g_string_append(alter_table_statement,"ALTER TABLE `");
+  g_string_append(alter_table_statement,"ALTER TABLE ");
+  g_string_append_c(alter_table_statement,identifier_quote_character);
   g_string_append(alter_table_statement,table);
-  g_string_append(alter_table_statement,"` ");
+  g_string_append_c(alter_table_statement,identifier_quote_character);
+  g_string_append(alter_table_statement," ");
 }
 
 void finish_alter_table(GString * alter_table_statement){
@@ -1241,8 +1264,8 @@ int global_process_create_table_statement (gchar * statement, GString *create_ta
         g_string_append(alter_table_constraint_statement, split_file[i]);
       }else{
         if (g_strrstr(split_file[i],"AUTO_INCREMENT")){
-          gchar** autoinc_split=g_strsplit(split_file[i],"`",3);
-          autoinc_column=g_strdup_printf("(`%s`", autoinc_split[1]);
+          gchar** autoinc_split=g_strsplit(split_file[i],identifier_quote_character_str,3);
+          autoinc_column=g_strdup_printf("(%c%s%c", identifier_quote_character, autoinc_split[1], identifier_quote_character);
         }
         g_string_append(create_table_statement, split_file[i]);
         g_string_append_c(create_table_statement,'\n');
@@ -1270,6 +1293,7 @@ void initialize_conf_per_table(struct configuration_per_table *cpt){
   cpt->all_num_threads_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
 
   cpt->all_columns_on_select_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
+  cpt->all_columns_on_select_replace_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
   cpt->all_columns_on_insert_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
 
   cpt->all_object_to_export=g_hash_table_new ( g_str_hash, g_str_equal );
@@ -1324,6 +1348,11 @@ void parse_object_to_export(struct object_to_export *object_to_export,gchar *val
 gchar *build_dbt_key(gchar *a, gchar *b){
   return g_strdup_printf("%c%s%c.%c%s%c", identifier_quote_character, a, identifier_quote_character, identifier_quote_character, b, identifier_quote_character);
 }
+
+gchar *build_config_file_dbt_key(const gchar *a, const gchar *b){
+  return g_strdup_printf("`%s`.`%s`", a, b);
+}
+
 /*
 gboolean common_arguments_callback(const gchar *option_name,const gchar *value, gpointer data, GError **error){
   *error=NULL;

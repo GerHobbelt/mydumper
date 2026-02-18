@@ -90,7 +90,7 @@ extern guint64 max_transaction_size;
 
 const char DIRECTORY[] = "import";
 
-struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 GHashTable * set_session_hash=NULL;
 
 GHashTable * myloader_initialize_hash_of_session_variables(){
@@ -625,6 +625,11 @@ int main(int argc, char *argv[]) {
   if (replication_statements->change_replication_source){
     g_message("Sending change replication source");
     execute_replication_commands(conn,replication_statements->change_replication_source->str);
+  }
+
+  if (replication_statements->gtid_purge){
+    g_message("Sending GTID Purge");
+    execute_replication_commands(conn,replication_statements->gtid_purge->str);
   }
 
   if (replication_statements->start_replica){
