@@ -229,6 +229,9 @@ static GOptionEntry extra_entries[] = {
     { "no-check-generated-fields", 0, 0, G_OPTION_ARG_NONE, &ignore_generated_fields,
       "Queries related to generated fields are not going to be executed."
       "It will lead to restoration issues if you have generated columns", NULL },
+    { "bulk-metadata-prefetch", 0, 0, G_OPTION_ARG_NONE, &bulk_metadata_prefetch,
+      "Prefetch JSON and generated column metadata in bulk at startup. "
+      "Significantly faster for dumping many tables, but slower for small dumps with -T", NULL },
     {"order-by-primary", 0, 0, G_OPTION_ARG_NONE, &order_by_primary_key,
       "Sort the data by Primary Key or Unique key if no primary key exists", NULL},
     {"compact", 0, 0, G_OPTION_ARG_NONE, &compact, 
@@ -328,7 +331,7 @@ static GOptionEntry checksum_entries[] = {
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
 
 static GOptionEntry filter_entries[] = {
-    {"database", 'B', 0, G_OPTION_ARG_STRING, &db,
+    {"database", 'B', 0, G_OPTION_ARG_STRING, &source_db,
       "Comma delimited list of databases to dump", NULL},
     {"ignore-engines", 'i', 0, G_OPTION_ARG_STRING, &ignore_engines_str,
       "Comma delimited list of storage engines to ignore", NULL},

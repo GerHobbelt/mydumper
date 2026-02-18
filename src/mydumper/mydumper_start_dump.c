@@ -74,6 +74,7 @@ gchar *initial_source_gtid = NULL;
 // Program options used only on this file 
 extern guint ftwrl_max_wait_time;
 extern guint ftwrl_timeout_retries;
+extern char **ignore_engines;
 
 // static variables
 static GMutex **pause_mutex_per_thread=NULL;
@@ -98,8 +99,8 @@ void initialize_start_dump(){
     g_warning("Using --trx-tables options, binlog coordinates will not be "
               "accurate if you are writing to non transactional tables.");
 
-  if (db){
-    db_items=g_strsplit(db,",",0);
+  if (source_db){
+    db_items=g_strsplit(source_db,",",0);
   }
 }
 
@@ -182,11 +183,16 @@ void determine_columns_on_show_processlist( MYSQL_FIELD *fields, guint num_field
 void *monitor_ftwrl_thread (void *thread_id){
   MYSQL *conn;
   MYSQL_RES *res = NULL;
+  gboolean ftwrl_found_in_processlist = FALSE;
   conn = mysql_init(NULL);
   m_connect(conn);
   gchar *query=NULL;
   while (!ftwrl_completed){
-    sleep(ftwrl_max_wait_time);
+    if (ftwrl_found_in_processlist == TRUE) {
+      sleep(ftwrl_max_wait_time);
+    } else {
+      sleep(1);
+    }
     res = m_store_result(conn,"SHOW PROCESSLIST", m_warning, "Could not check PROCESSLIST");
     if (!res){
        break;
@@ -199,8 +205,13 @@ void *monitor_ftwrl_thread (void *thread_id){
       while ((row = mysql_fetch_row(res))) {
         if ((atol(row[id_col]) == *((guint *)(thread_id)))){
            if (!strcasecmp(FLUSH_TABLES_WITH_READ_LOCK, row[info_col]) || !strcasecmp(FLUSH_NO_WRITE_TO_BINLOG_TABLES, row[info_col])){
-             m_query_warning(conn, query = g_strdup_printf("KILL QUERY %lu", atol(row[id_col])), "Could not KILL slow query", NULL);
-             g_free(query);
+             if (ftwrl_found_in_processlist == TRUE){
+               m_query_warning(conn, query = g_strdup_printf("KILL QUERY %lu", atol(row[id_col])), "Could not KILL slow query", NULL);
+               g_free(query);
+               ftwrl_found_in_processlist = FALSE;
+             } else {
+               ftwrl_found_in_processlist = TRUE;
+             }
            }
 //            g_message("%s found. KILL %d",row[info_col], id_col);
         }
@@ -380,16 +391,17 @@ void detect_sql_mode(MYSQL *conn){
 }
 
 static
-MYSQL *create_main_connection() {
+MYSQL *create_main_connection(GOptionContext *context) {
   MYSQL *conn;
   conn = mysql_init(NULL);
 
-  m_connect(conn); //, db_items!=NULL?db_items[0]:db);
+  m_connect(conn);
 
   set_session = g_string_new(NULL);
   set_global = g_string_new(NULL);
   set_global_back = g_string_new(NULL);
   server_detect(conn);
+  load_options_for_product_from_key_file(key_file, context, "mydumper", get_product(), get_major(), get_secondary(), get_revision());
   GHashTable * set_session_hash = mydumper_initialize_hash_of_session_variables();
   GHashTable * set_global_hash = g_hash_table_new ( g_str_hash, g_str_equal );
   if (key_file != NULL ){
@@ -635,6 +647,8 @@ void determine_ddl_lock_function(MYSQL ** conn, void(**acquire_global_lock_funct
       }
       break;
     case SERVER_TYPE_RDS:
+      m_critical("We support LOCK_ALL and SAFE_NO_LOCK modes for RDS/Aurora. Select one of them to configure --sync-thread-lock-mode");
+      break;
     case SERVER_TYPE_MYSQL: 
       switch (get_major()) {
         case 8:
@@ -674,14 +688,14 @@ void determine_ddl_lock_function(MYSQL ** conn, void(**acquire_global_lock_funct
 // see write_database_on_disk() for db write to metadata
 
 void print_dbt_on_metadata_gstring(struct db_table *dbt, GString *data){
-  char *name= newline_protect(dbt->database->name);
-  char *table_filename= newline_protect(dbt->table_filename);
+  char *name= newline_protect(dbt->database->source_database);
   char *table= newline_protect(dbt->table);
   g_mutex_lock(dbt->chunks_mutex);
-  g_string_append_printf(data,"\n[%s]\n", dbt->key);
+  gchar *lkey=build_dbt_key(dbt->database->database_name_in_filename, dbt->table_filename);
+  g_string_append_printf(data,"\n[%s]\n", lkey);
   g_string_append_printf(data, "real_table_name=%s\nrows = %"G_GINT64_FORMAT"\n", table, dbt->rows);
   g_free(name);
-  g_free(table_filename);
+  g_free(lkey);
   g_free(table);
   if (dbt->is_sequence)
     g_string_append_printf(data,"is_sequence = 1\n");
@@ -703,7 +717,7 @@ void print_dbt_on_metadata(FILE *mdfile, struct db_table *dbt){
   fprintf(mdfile, "%s", data->str);
   if (check_row_count && !dbt->object_to_export.no_data && (dbt->rows != dbt->rows_total)) {
     m_critical("Row count mismatch found for %s.%s: got %u of %u expected",
-               dbt->database->name, dbt->table, dbt->rows, dbt->rows_total);
+               dbt->database->source_database, dbt->table, dbt->rows, dbt->rows_total);
   }
 }
 
@@ -740,10 +754,10 @@ void send_lock_all_tables(MYSQL *conn){
     }
     tables_lock = g_list_reverse(tables_lock);
   } else { 
-    if (db) {
+    if (source_db) {
       GString *db_quoted_list=NULL;
       guint i=0;
-      db_quoted_list=g_string_sized_new(strlen(db));
+      db_quoted_list=g_string_sized_new(strlen(source_db));
       g_string_append_printf(db_quoted_list,"'%s'",db_items[i]);
       i++;
       for (; i<g_strv_length(db_items); i++){
@@ -859,7 +873,7 @@ cleanup:
 
 // Here is where the backup process start
 
-void start_dump(struct configuration *conf) {
+void start_dump(struct configuration *conf, GOptionContext *context) {
   memset(conf, 0, sizeof(struct configuration));
 
   MYSQL *conn = NULL, *second_conn = NULL;
@@ -886,10 +900,13 @@ void start_dump(struct configuration *conf) {
 
   check_num_threads();
   g_message("Using %u dumper threads", num_threads);
-  initialize_start_dump();
-  initialize_common();
 
   initialize_connection(MYDUMPER);
+  conn = create_main_connection(context);
+
+  initialize_start_dump();
+  initialize_common();
+  initialize_create_jobs(conf);
   initialize_masquerade();
 
   /* Give ourselves an array of tables to dump */
@@ -903,10 +920,14 @@ void start_dump(struct configuration *conf) {
   initialize_regex(partition_regex);
 
   // Connecting to the database
-  conn = create_main_connection();
+//  conn = create_main_connection(context);
   main_connection = conn;
   second_conn = conn;
   conf->use_any_index= 1;
+
+  // Prefetch table metadata if --bulk-metadata-prefetch is enabled
+  if (bulk_metadata_prefetch)
+    prefetch_table_metadata(conn);
 
   if (disk_limits!=NULL){
     conf->pause_resume = g_async_queue_new();
@@ -1004,7 +1025,7 @@ void start_dump(struct configuration *conf) {
       g_message("Executing in NO_LOCK mode, we are not able to ensure that backup will be consistent");
       break;
     case SAFE_NO_LOCK:
-      g_message("Executing in SAFE_NO_LOCK mode. This backup will fail if all threads are not in the same point in time, which garanty consitency");
+      g_message("Executing in SAFE_NO_LOCK mode. This backup will fail if all threads are not in the same point in time, which ensures consistency");
       break;
     case LOCK_ALL:
       send_lock_all_tables(conn);
@@ -1046,16 +1067,19 @@ void start_dump(struct configuration *conf) {
   if (get_product() != SERVER_TYPE_MARIADB || server_version < 100300)
     nroutines= 2;
 
+  MYSQL_RES *rest = NULL;
   // tokudb do not support consistent snapshot
-  MYSQL_RES *rest = m_store_result(conn, "SELECT @@tokudb_version", m_message, "@@tokudb_version not found", NULL);
-  if (rest){
-    if (mysql_num_rows(rest)) {
+  if (!m_pstrstr(ignore_engines, "tokudb")){    
+    rest = m_store_result(conn, "SELECT @@tokudb_version", m_message, "@@tokudb_version not found", NULL);
+    if (rest){
+      if (mysql_num_rows(rest)) {
+        mysql_free_result(rest);
+        g_message("TokuDB detected, creating dummy table for CS");
+        m_query_warning(conn, "CREATE TABLE IF NOT EXISTS mysql.tokudbdummy (a INT) ENGINE=TokuDB", "Not able to create dummy table for TokuDB", NULL);
+        need_dummy_toku_read = 1;
+      }
       mysql_free_result(rest);
-      g_message("TokuDB detected, creating dummy table for CS");
-      m_query_warning(conn, "CREATE TABLE IF NOT EXISTS mysql.tokudbdummy (a INT) ENGINE=TokuDB", "Not able to create dummy table for TokuDB", NULL);
-      need_dummy_toku_read = 1;
     }
-    mysql_free_result(rest);
   }
 
   if (need_dummy_read) {
@@ -1106,14 +1130,14 @@ void start_dump(struct configuration *conf) {
 
   // Create metadata job
   if (is_mysql_like())
-    create_job_to_write_source_and_replica_status(conf, mdfile);
+    create_job_to_write_source_and_replica_status(mdfile);
   else
     g_async_queue_push(conf->source_and_replica_status_queue,GINT_TO_POINTER(1));
   
   trace("Create tablespace jobs");
   // Create tablespace jobs
   if (dump_tablespaces){
-    create_job_to_dump_tablespaces(conf);
+    create_job_to_dump_tablespaces();
   }
 
   // There are 3 ways to dump tables based on the filters
@@ -1124,19 +1148,17 @@ void start_dump(struct configuration *conf) {
   // if tables and db both exists , should not call dump_database_thread
   if (tables && g_strv_length(tables) > 0) {
     trace("Specific tables");
-    create_job_to_dump_table_list(tables, conf);
+    create_job_to_dump_table_list(tables);
   } else if (db_items && g_strv_length(db_items) > 0) {
     trace("Specific databases");
     guint i=0;
     for (i=0;i<g_strv_length(db_items);i++){
-      struct database *this_db=new_database(conn,db_items[i],TRUE);
-      create_job_to_dump_database(this_db, conf);
-      if (!no_schemas)
-        create_job_to_dump_schema(this_db, conf);
+      struct database *this_db=get_database(conn,db_items[i],!no_schemas);
+      create_job_to_dump_database(this_db);
     }
   } else {
     trace("All databases");
-    create_job_to_dump_all_databases(conf);
+    create_job_to_dump_all_databases();
   }
 
   trace("End Job Creation");
@@ -1327,7 +1349,8 @@ void start_dump(struct configuration *conf) {
   g_async_queue_unref(conf->ready_non_transactional_queue);
   conf->ready_non_transactional_queue=NULL;
 
-  fprintf(mdfile, "[config]\nmax-statement-size = %ld\n", max_statement_size);
+  fprintf(mdfile, "[config]\nmax-statement-size = %" G_GUINT64_FORMAT "\n", max_statement_size);
+  fprintf(mdfile, "num-sequences = %d\n", num_sequences);
 
   datetime = g_date_time_new_now_local();
   datetimestr=g_date_time_format(datetime,"\%Y-\%m-\%d \%H:\%M:\%S");
@@ -1399,6 +1422,5 @@ void start_dump(struct configuration *conf) {
 
   free_regex();
   free_common();
-  free_set_names();
 }
 

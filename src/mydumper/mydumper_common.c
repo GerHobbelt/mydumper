@@ -66,7 +66,7 @@ char * determine_filename (char * table){
   // https://stackoverflow.com/questions/11794144/regular-expression-for-valid-filename
   // We might need to define a better filename alternatives
   if (!masquerade_filename && check_filename_regex(table) && !g_strstr_len(table,-1,".") && !g_str_has_prefix(table,"mydumper_") )
-    return g_strdup(table);
+    return newline_protect(table);
   else{
     char *r = g_strdup_printf("mydumper_%d",table_number);
     table_number++;
@@ -93,11 +93,7 @@ char * escape_string(MYSQL *conn, char *str){
 }
 
 gchar * build_schema_table_filename(char *database, char *table, const char *suffix){
-  GString *filename = g_string_sized_new(20);
-  g_string_append_printf(filename, "%s.%s-%s.sql", database, table, suffix);
-  gchar *r = g_build_filename(dump_directory, filename->str, NULL);
-  g_string_free(filename,TRUE);
-  return r;
+  return common_build_schema_table_filename(dump_directory, database, table, suffix);
 }
 
 gchar * build_schema_filename(const char *database, const char *suffix){
@@ -298,9 +294,9 @@ unsigned long m_real_escape_string(MYSQL *conn, char *to, const gchar *from, uns
 }
 
 void m_escape_char_with_char(gchar neddle, gchar repl, gchar *to, unsigned long length){
-  gchar *from=g_new(char, length);
-  memcpy(from, to, length);
-  gchar *ffrom=from;
+  gchar *ffrom=g_new(char, length);
+  memcpy(ffrom, to, length);
+  gchar *from=ffrom;
   const char *end = from + length;
   for (end = from + length; from < end; from++) {
     if ( *from == neddle ){
@@ -310,6 +306,7 @@ void m_escape_char_with_char(gchar neddle, gchar repl, gchar *to, unsigned long 
     *to=*from;
     to++;
   }
+  *to='\0';
   g_free(ffrom);
 }
 
@@ -442,3 +439,14 @@ guint parse_rows_per_chunk(const gchar *rows_p_chunk, guint64 *min, guint64 *sta
   return len;
 }
 
+
+gboolean m_pstrstr(char **str_list, const gchar* needle){
+  if (str_list){
+    guint i=0;
+    for (i = 0; str_list[i] != NULL; i++) {
+      if (!g_ascii_strcasecmp(str_list[i], needle))
+        return TRUE;
+    } 
+  } 
+  return FALSE;
+}

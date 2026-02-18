@@ -124,17 +124,9 @@ struct function_pointer{
 };
 
 gchar * remove_new_line(gchar *to);
-char * checksum_table_structure(MYSQL *conn, char *database, char *table);
-char * checksum_table(MYSQL *conn, char *database, char *table);
-char * checksum_process_structure(MYSQL *conn, char *database, char *table);
-char * checksum_trigger_structure(MYSQL *conn, char *database, char *table);
-char * checksum_trigger_structure_from_database(MYSQL *conn, char *database, char *table);
-char * checksum_view_structure(MYSQL *conn, char *database, char *table);
-char * checksum_database_defaults(MYSQL *conn, char *database, char *table);
-char * checksum_table_indexes(MYSQL *conn, char *database, char *table);
 int write_file(FILE * file, char * buff, int len);
 guint strcount(gchar *text);
-void m_remove0(gchar * directory, const gchar * filename);
+gboolean m_remove0(gchar * directory, const gchar * filename);
 gboolean m_remove(gchar * directory, const gchar * filename);
 GKeyFile * load_config_file(gchar * config_file);
 void load_config_group(GKeyFile *kf, GOptionContext *context, const gchar * group);
@@ -235,3 +227,5 @@ GThread * m_thread_new(const gchar* title, GThreadFunc func, gpointer data, cons
 void *monitor_throttling_thread (void *queue);
 gchar *set_names_statement_template(gchar *_set_names);
 void execute_set_names(MYSQL *conn, gchar *_set_names);
+gchar * common_build_schema_table_filename(gchar *_directory, char *database, char *table, const char *suffix);
+void load_options_for_product_from_key_file(GKeyFile *kf, GOptionContext *context, const gchar *app, int product, int major, int secondary, int revision);

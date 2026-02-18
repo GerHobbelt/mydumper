@@ -26,9 +26,10 @@
 #include "myloader.h"
 #include "myloader_common.h"
 #include "myloader_global.h"
-#include "myloader_intermediate_queue.h"
+#include "myloader_process_filename.h"
 #include "myloader_process.h"
 #include "myloader_restore.h"
+#include "myloader_database.h"
 
 struct statement * new_statement();
 guint64 max_transaction_size=DEFAULT_MAX_TRANSACTION_SIZE;
@@ -232,7 +233,7 @@ int restore_insert(struct connection_data *cd, struct thread_data*td,
   guint tr=0,current_offset_line=offset_line-1;
   gchar *current_line=next_line;
   next_line=g_strstr_len(current_line, -1, "\n");
-  GString * new_insert=g_string_sized_new(strlen(insert_statement_prefix));
+  GString * new_insert=g_string_sized_new(strlen(insert_statement_prefix) + 65536);
   guint current_rows=0;
   guint64 transaction_size=0;
   do {
@@ -259,9 +260,9 @@ int restore_insert(struct connection_data *cd, struct thread_data*td,
       transaction_size+=new_insert->len;
       tr=restore_data_in_gstring_by_statement(cd, new_insert, FALSE, query_counter);
       g_usleep(throttle_time);
-      g_mutex_lock(dbt->mutex);
+      table_lock(dbt);
       dbt->rows_inserted+=current_rows;
-      g_mutex_unlock(dbt->mutex);
+      table_unlock(dbt);
       if (cd->transaction && *query_counter == commit_count) {
         tr+=m_commit_and_start_transaction(cd,query_counter);
         transaction_size=0;
@@ -439,7 +440,7 @@ int restore_data_from_mysqldump_file(struct thread_data *td, const char *filenam
 
   FILE *infile=NULL;
   gboolean eof = FALSE;
-  GString *data = g_string_sized_new(256);
+  GString *data = g_string_sized_new(is_schema ? 4096 : 65536);
   guint line=0,preline=0;
   gchar *path = g_build_filename(directory, filename, NULL);
   infile=myl_open(path,"r");
@@ -516,7 +517,7 @@ int restore_data_from_mydumper_file(struct thread_data *td, const char *filename
 
   FILE *infile=NULL;
   gboolean eof = FALSE;
-  GString *data = g_string_sized_new(256);
+  GString *data = g_string_sized_new(is_schema ? 4096 : 65536);
   guint line=0,preline=0;
   gchar *path = g_build_filename(directory, filename, NULL);
   infile=myl_open(path,"r");

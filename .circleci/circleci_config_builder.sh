@@ -124,6 +124,12 @@ all_os[${os}_1]="almalinux:9"
 
 all_os[${os}_3]="true"
 
+os=el10
+all_os[${os}_0]="el10"
+all_os[${os}_1]="almalinux:10"
+
+all_os[${os}_3]="true"
+
 os=bullseye
 all_os[${os}_0]="bullseye"
 all_os[${os}_1]="debian:bullseye"
@@ -145,11 +151,11 @@ all_os[${os}_3]="true"
 # os=
 # all_os[${os}_0]=""
 # all_os[${os}_1]=""
-list_el_os=("el7" "el8" "el9")
-list_el_os_without_el=( "7" "8" "9" )
+list_el_os=("el7" "el8" "el9" "el10")
+list_el_os_without_el=( "7" "8" "9" "10")
 list_ubuntu_os=("bionic" "focal" "jammy" "noble")
 list_debian_os=("bullseye" "bookworm" "trixie")
-list_all_os=("bionic" "focal" "jammy" "noble" "el7" "el8" "el9" "bullseye" "bookworm" "trixie")
+list_all_os=("bionic" "focal" "jammy" "noble" "el7" "el8" "el9" "el10" "bullseye" "bookworm" "trixie")
 
 build_man_os="jammy_mysql80_amd64"
 
@@ -161,6 +167,7 @@ list_build=(
   "el7_percona57_x86_64" 
   "el8_mysql84_x86_64"          "el8_mysql84_aarch64"
   "el9_mysql84_x86_64"          "el9_mysql84_aarch64"
+  "el10_mysql84_x86_64"         "el10_mysql84_aarch64"
   "bullseye_percona57_amd64"
   "bookworm_mysql84_amd64"      "bookworm_mariadb1011_arm64"
   "trixie_debian_default_amd64" "trixie_debian_default_arm64"
@@ -169,13 +176,14 @@ list_build=(
 #   "noble_percona57"    "noble_percona80"    "noble_mariadb1011"    "noble_mariadb1006"
 list_compile=(
   "bionic_percona57"   "bionic_percona80"
-  "focal_percona57"    "focal_percona80"    "focal_mariadb1011"    #"focal_mariadb1006"
+  "focal_percona57"    "focal_percona80"    #"focal_mariadb1011"    "focal_mariadb1006"
 # jammy is in the tests list 
 #                                                                                          "noble_mysql84" This is already on the list of test
                                                                                                              "noble_ubuntu_default"
   "el7_percona57"      "el7_percona80"      "el7_mariadb1011"      "el7_mariadb1006"      "el7_mysql84"
   "el8_percona57"      "el8_percona80"      "el8_mariadb1011"      "el8_mariadb1006"      "el8_mysql84"
                        "el9_percona80"      "el9_mariadb1011"      "el9_mariadb1006"      "el9_mysql84"
+                       "el10_mysql80"       "el10_mariadb1011"                            "el10_mysql84"
   "bullseye_percona57" "bullseye_percona80" "bullseye_mariadb1011" "bullseye_mariadb1006"
   "bookworm_percona57" "bookworm_percona80" "bookworm_mariadb1011"                        "bookworm_mysql84"
                                                                                                              "trixie_debian_default"
@@ -306,12 +314,19 @@ commands:
 
   prepare_apt_mysql84:
     steps:
-    - run: echo "mysql-apt-config mysql-apt-config/select-product string Ok" | sudo debconf-set-selections
-    - run: echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.4-lts" | sudo debconf-set-selections
-    - run: sudo rm /usr/share/keyrings/mysql-apt-config.gpg
-    - run: echo "4" | DEBIAN_FRONTEND=noninteractive sudo dpkg-reconfigure mysql-apt-config
-    - run: sudo apt-get update
-    - run: sudo apt-get install -y gdb screen time libmysqlclient24 libmysqlclient-dev mysql-client
+    - run:
+        command: |
+          echo "mysql-apt-config mysql-apt-config/select-product string Ok" | sudo debconf-set-selections
+          echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.4-lts" | sudo debconf-set-selections
+          sudo rm /usr/share/keyrings/mysql-apt-config.gpg
+          echo "3" | DEBIAN_FRONTEND=noninteractive sudo dpkg-reconfigure mysql-apt-config
+          gpg --batch --yes --delete-keys BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
+          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB7B3B788A8D3785C" -o /tmp/fresh.asc
+          gpg --import /tmp/fresh.asc
+          rm -f /usr/share/keyrings/mysql-apt-config.gpg
+          gpg --output /usr/share/keyrings/mysql-apt-config.gpg --export BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
+          sudo apt-get update
+          sudo apt-get install -y gdb screen time libmysqlclient24 libmysqlclient-dev mysql-client
 
   prepare_apt_mariadb1006:
     steps:
@@ -351,7 +366,7 @@ commands:
     - run: sudo yum install -y libasan gdb screen time MariaDB-compat || true
 EOF
 
-for os in el7 el9
+for os in el7 el9 el10
 do
     for vendor in ${list_mysql_version[@]} ${list_percona_version[@]}
     do
@@ -373,7 +388,7 @@ do
 "
 done
 
-for os in el8 el9
+for os in el8 el9 el10
 do
     for vendor in ${list_mariadb_version[@]}
     do
