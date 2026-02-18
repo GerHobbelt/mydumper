@@ -43,6 +43,7 @@ gboolean use_single_column=FALSE;
 const gchar *table_engine_for_view_dependency=MEMORY;
 guint ftwrl_max_wait_time=60;
 guint ftwrl_timeout_retries=0;
+gchar *load_data_character_set=NULL;
 
 gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointer data, GError **error){
   *error=NULL;
@@ -325,7 +326,9 @@ static GOptionEntry checksum_entries[] = {
     {"data-checksums", 0, 0, G_OPTION_ARG_NONE, &data_checksums,
       "Dump table checksums with the data", NULL},
     {"schema-checksums", 0, 0, G_OPTION_ARG_NONE, &schema_checksums,
-      "Dump schema table and view creation checksums", NULL},
+      "Dump schema table and view creation checksums (enabled by default)", NULL},
+    {"no-schema-checksums", 0, G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &schema_checksums,
+      "Disable schema checksums", NULL},
     {"routine-checksums", 0, 0, G_OPTION_ARG_NONE, &routine_checksums,
       "Dump triggers, functions and routines checksums", NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};
@@ -358,8 +361,11 @@ static GOptionEntry objects_entries[] = {
      "Dump stored procedures and functions. By default, it does not dump stored procedures nor functions", NULL},
     {"skip-constraints", 0, 0, G_OPTION_ARG_NONE, &skip_constraints, 
       "Remove the constraints from the CREATE TABLE statement. By default, the statement is not modified", NULL },
-    {"skip-indexes", 0, 0, G_OPTION_ARG_NONE, &skip_indexes, 
+    {"skip-indexes", 0, 0, G_OPTION_ARG_NONE, &skip_indexes,
       "Remove the indexes from the CREATE TABLE statement. By default, the statement is not modified", NULL},
+    {"skip-metadata-sorting", 0, 0, G_OPTION_ARG_NONE, &skip_metadata_sorting,
+      "Skip sorting tables/databases in metadata file. Saves 30-60s on 250K+ tables. "
+      "Only affects metadata file readability, not restore functionality", NULL},
     {"views-as-tables", 0, 0, G_OPTION_ARG_NONE, &views_as_tables, 
       "Export VIEWs as they were tables", NULL},
     {"no-views", 'W', 0, G_OPTION_ARG_NONE, &no_dump_views, 
@@ -406,6 +412,8 @@ static GOptionEntry statement_entries[] = {
       "Dump binary columns using hexadecimal notation", NULL},
     {"skip-definer", 0, 0, G_OPTION_ARG_NONE, &skip_definer,
       "Removes DEFINER from the CREATE statement. By default, statements are not modified", NULL},
+    {"replace-definer", 0, 0, G_OPTION_ARG_STRING, &replace_definer,
+     "Replaces the user in the DEFINER by the new string. By default, statements are not modified", NULL},
     {"statement-size", 's', 0, G_OPTION_ARG_INT, &statement_size,
       "Attempted size of INSERT statement in bytes, default 1000000", NULL},
     {"tz-utc", 0, G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE, &skip_tz,
@@ -419,6 +427,8 @@ static GOptionEntry statement_entries[] = {
       "Accepts a list of up to 2 charsets, and adds 'SET NAMES' with the proper charset from the list, where the first item is used for the schema files and the second item is used for the data files. Use it at your own risk as it might cause inconsistencies #1974. Default: binary,binary", NULL },
     {"default-character-set",0, 0, G_OPTION_ARG_CALLBACK, &arguments_callback,
       "Accepts a list of up to 2 charsets, and executes 'SET NAMES' with the proper charset from the list, where the first item is used when executes SHOW CREATE TABLE and the second item is used for the rest. Use it at your own risk as it might cause inconsistencies #1974. Default: auto,binary. auto means that it is going to use the table character set.", NULL },
+    {"load-data-character-set",0, 0, G_OPTION_ARG_STRING, &load_data_character_set,
+      "Sets the character that will be added to the CHARACTER SET clause in the LOAD DATA statement. Use it at your own risk as it might cause inconsistencies. By default CHARACTER SET will not be added", NULL },
     {"table-engine-for-view-dependency", 0, 0, G_OPTION_ARG_STRING, &table_engine_for_view_dependency, 
       "Table engine to be used for the CREATE TABLE statement for temporary tables when using views",NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};

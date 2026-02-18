@@ -60,7 +60,7 @@ gboolean optimize_keys_all_tables = FALSE;
 gboolean kill_at_once = FALSE;
 gboolean enable_binlog = FALSE;
 gboolean disable_redo_log = FALSE;
-enum checksum_modes checksum_mode= CHECKSUM_FAIL;
+enum checksum_modes checksum_mode= CHECKSUM_WARN;  // Issue #1975: Warn by default instead of fail
 gboolean skip_triggers = FALSE;
 gboolean skip_constraints = FALSE;
 gboolean skip_indexes = FALSE;
@@ -85,7 +85,6 @@ gboolean no_delete = FALSE;
 
 extern GHashTable *database_hash;
 extern gboolean shutdown_triggered;
-extern gboolean skip_definer;
 extern gboolean local_infile;
 extern guint64 max_transaction_size;
 
@@ -249,6 +248,7 @@ void print_help(){
     print_string("set-names",set_names_in_conn_by_default);
 
     print_bool("skip-definer",skip_definer);
+    print_string("replace-definer",replace_definer);
     print_bool("help",help);
 
     print_string("directory",input_directory);
@@ -313,7 +313,7 @@ void print_errors(){
 }
 
 int main(int argc, char *argv[]) {
-  struct configuration conf = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL};
+  struct configuration conf = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL};
 
   GError *error = NULL;
   GOptionContext *context;
@@ -357,12 +357,19 @@ int main(int argc, char *argv[]) {
   if (overwrite_unsafe)
     overwrite_tables= TRUE;
 
-  check_num_threads();
+  // Auto-scale schema/index threads based on CPU count
+  // Only auto-scale if user hasn't explicitly set these values (default is 4)
+  guint cpu_count = g_get_num_processors();
+  if (max_threads_for_schema_creation == 4 && cpu_count > 4) {
+    guint auto_schema_threads = cpu_count > 8 ? 8 : cpu_count;
+    max_threads_for_schema_creation = auto_schema_threads;
+  }
+  if (max_threads_for_index_creation == 4 && cpu_count > 4) {
+    guint auto_index_threads = cpu_count > 8 ? 8 : cpu_count;
+    max_threads_for_index_creation = auto_index_threads;
+  }
 
-  if (num_threads > max_threads_per_table)
-    g_message("Using %u loader threads (%u per table)", num_threads, max_threads_per_table);
-  else
-    g_message("Using %u loader threads", num_threads);
+  check_num_threads();
 
   initialize_set_names();
 
@@ -388,6 +395,11 @@ int main(int argc, char *argv[]) {
   set_verbose(verbose);
 
   g_message("MyDumper restore version: %s", VERSION);
+
+  if (num_threads > max_threads_per_table)
+    g_message("Using %u loader threads (%u per table)", num_threads, max_threads_per_table);
+  else
+    g_message("Using %u loader threads", num_threads);
 
   // Starts modifying file in disk, creating objects and restore
 
@@ -452,6 +464,7 @@ int main(int argc, char *argv[]) {
   conf.post_table_queue = g_async_queue_new();
   conf.post_queue = g_async_queue_new();
   conf.index_queue = g_async_queue_new();
+  conf.ready_table_queue = g_async_queue_new();
   conf.view_queue = g_async_queue_new();
   conf.ready = g_async_queue_new();
   conf.pause_resume = g_async_queue_new();

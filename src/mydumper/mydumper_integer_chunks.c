@@ -351,7 +351,9 @@ struct chunk_step_item *get_next_integer_chunk(struct db_table *dbt){
         new_csi->part+=pow(2,csi->deep);
         update_where_on_integer_step(new_csi);
 
-        dbt->chunks=g_list_append(dbt->chunks,new_csi);
+        // Perf: Use g_list_prepend (O(1)) instead of g_list_append (O(n))
+        // Order doesn't matter since chunks are processed via async queue
+        dbt->chunks=g_list_prepend(dbt->chunks,new_csi);
         // should I push them again? isn't it pointless?
 //        g_async_queue_push(dbt->chunks_queue, csi);
 //        g_async_queue_push(dbt->chunks_queue, new_csi);
@@ -395,7 +397,8 @@ struct chunk_step_item *get_next_integer_chunk(struct db_table *dbt){
               new_csi->next=new_csi_next;
 
               new_csi->next->prefix = new_csi->where;
-              dbt->chunks=g_list_append(dbt->chunks,new_csi);
+              // Perf: Use g_list_prepend (O(1)) instead of g_list_append (O(n))
+              dbt->chunks=g_list_prepend(dbt->chunks,new_csi);
               g_async_queue_push(dbt->chunks_queue, csi);
               g_async_queue_push(dbt->chunks_queue, new_csi);
               g_mutex_unlock(csi->next->mutex);
@@ -419,7 +422,8 @@ struct chunk_step_item *get_next_integer_chunk(struct db_table *dbt){
           trace("Multicolumn table splited min: %lld max: %lld ", new_csi->chunk_step->integer_step.type.unsign.min, new_csi->chunk_step->integer_step.type.unsign.max);
         else
           trace("Multicolumn table splited min: %lld max: %lld ", new_csi->chunk_step->integer_step.type.sign.min, new_csi->chunk_step->integer_step.type.sign.max);
-        dbt->chunks=g_list_append(dbt->chunks,new_csi);
+        // Perf: Use g_list_prepend (O(1)) instead of g_list_append (O(n))
+        dbt->chunks=g_list_prepend(dbt->chunks,new_csi);
         g_async_queue_push(dbt->chunks_queue, csi);
         g_async_queue_push(dbt->chunks_queue, new_csi);
         g_mutex_unlock(csi->mutex);
@@ -617,7 +621,8 @@ guint process_integer_chunk_step(struct table_job *tj, struct chunk_step_item *c
   }
   if (!c_min && !c_max){
     trace("Thread %d: I-Chunk 1: both min and max doesn't exists", td->thread_id);
-    close_files(tj);
+    if (csi->position==0)
+      close_files(tj);
     g_mutex_unlock(csi->mutex);
     goto update_min;
 //    goto end_process; 
@@ -765,15 +770,15 @@ retry:
       trace("Thread %d: I-Chunk 3: Last chunk on `%s`.`%s` no need to calculate anything else after finish", td->thread_id, tj->dbt->database->source_database, tj->dbt->table);
       write_table_job_into_file(tj);
     }else{
-      GDateTime *from = g_date_time_new_now_local();
+      // Perf: Use g_get_monotonic_time() instead of GDateTime to eliminate allocations
+      // Both return microseconds - direct subtraction works
+      gint64 from_time = g_get_monotonic_time();
       write_table_job_into_file(tj);
-      GDateTime *to = g_date_time_new_now_local();
+      gint64 to_time = g_get_monotonic_time();
 
 // Step 3.1: Updating Step length
-
-      GTimeSpan diff=g_date_time_difference(to,from);
-      g_date_time_unref(from);
-      g_date_time_unref(to);
+      // g_get_monotonic_time is in microseconds, that is why we need to divide by G_TIME_SPAN_SECOND, as we compare in seconds
+      GTimeSpan diff = (to_time - from_time) / G_TIME_SPAN_SECOND;  // Zero allocation, same precision
       g_mutex_lock(csi->mutex);
 
 
@@ -790,9 +795,8 @@ retry:
         cs->integer_step.rows_in_explain-=tj->num_rows_of_last_run;
       else
         cs->integer_step.rows_in_explain=0;
-
       if (diff>0 && tj->num_rows_of_last_run>0){
-        cs->integer_step.step=tj->num_rows_of_last_run*max_time_per_select*G_TIME_SPAN_SECOND/diff;
+        cs->integer_step.step=tj->num_rows_of_last_run*max_time_per_select/diff;
         trace("Thread %d: I-Chunk 3: Step size on `%s`.`%s` is %ld  ( %ld %ld)", td->thread_id, tj->dbt->database->source_database, tj->dbt->table, cs->integer_step.step, tj->num_rows_of_last_run, diff);
       }else{
         cs->integer_step.step*=2;

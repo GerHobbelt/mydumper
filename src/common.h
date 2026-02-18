@@ -56,6 +56,7 @@
 #define BINARY_CHARSET "binary"
 #define AUTO_CHARSET "auto"
 extern GList *ignore_errors_list;
+extern GHashTable *ignore_errors_set;
 extern const gchar *start_replica;
 extern const gchar *stop_replica;
 extern const gchar *start_replica_sql_thread;
@@ -149,6 +150,9 @@ gchar **get_table_list(gchar *tables_list);
 void free_hash_table(GHashTable * hash);
 void remove_definer(GString * data);
 void remove_definer_from_gchar(char * str);
+void replace_definer_from_string(GString * data, char * _replace);
+void replace_definer_from_gchar (GString * output_data, char * str, char * _replace);
+void update_definer(GString *statement, gchar *replace_definer_str, gboolean skip_definer);
 void print_version(const gchar *program);
 gboolean stream_arguments_callback(const gchar *option_name,const gchar *value, gpointer data, GError **error);
 void initialize_set_names();
@@ -169,6 +173,7 @@ void m_message(const char *fmt, ...);
 void load_hash_of_all_variables_perproduct_from_key_file(GKeyFile *kf, GHashTable * set_session_hash, const gchar *str);
 GRecMutex * g_rec_mutex_new();
 gboolean read_data(FILE *file, GString *data, gboolean *eof, guint *line);
+gboolean should_ignore_error_code(guint error_code);
 gchar *m_date_time_new_now_local();
 
 void print_int(const char*_key, int val);
@@ -228,4 +233,4 @@ void *monitor_throttling_thread (void *queue);
 gchar *set_names_statement_template(gchar *_set_names);
 void execute_set_names(MYSQL *conn, gchar *_set_names);
 gchar * common_build_schema_table_filename(gchar *_directory, char *database, char *table, const char *suffix);
-void load_options_for_product_from_key_file(GKeyFile *kf, GOptionContext *context, const gchar *app, int product, int major, int secondary, int revision);
+void load_options_for_product_from_key_file(GKeyFile *kf, GOptionContext *context, const gchar *app, int major, int secondary, int revision);

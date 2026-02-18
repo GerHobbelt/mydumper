@@ -34,6 +34,7 @@
 extern gboolean help;
 guint errors=0;
 GList *ignore_errors_list=NULL;
+GHashTable *ignore_errors_set=NULL;
 GAsyncQueue *stream_queue = NULL;
 gboolean use_defer= FALSE;
 gboolean check_row_count= FALSE;
@@ -158,7 +159,7 @@ void parse_key_file_group(GKeyFile *kf, GOptionContext *context, const gchar * g
     if (!g_option_context_parse(context, &slen, &gclist, &error)) {
       m_critical("option parsing failed: %s, try --help\n", error->message);
     }else{
-      g_message("Config file loaded");
+      trace("Config file loaded");
     }
     g_strfreev(gclist);
   }
@@ -274,11 +275,11 @@ gboolean m_key_file_has_group (GKeyFile* kf, const gchar* group_name){
   return FALSE;
 }
 
-void load_options_for_product_from_key_file(GKeyFile *kf, GOptionContext *context, const gchar *app, int product, int major, int secondary, int revision){
+void load_options_for_product_from_key_file(GKeyFile *kf, GOptionContext *context, const gchar *app, int major, int secondary, int revision){
   GString *group=g_string_sized_new(50);
   g_string_append(group, app);
   g_string_append(group, "_");
-  g_string_append(group, g_ascii_strdown(get_product_name(product),-1));
+  g_string_append(group, g_ascii_strdown(get_product_name(),-1));
   g_message("searching group group %s",group->str);
   if (g_key_file_has_group(kf,group->str)){
     g_message("group found %s",group->str);
@@ -707,6 +708,42 @@ void remove_definer_from_gchar(char * str){
 void remove_definer(GString * data){
   remove_definer_from_gchar(data->str);
 }
+
+void replace_definer_from_string(GString * data, char * _replace){
+  char * from = g_strstr_len(data->str,50," DEFINER=");
+  if (from){
+    from++;
+    char * to=g_strstr_len(from,110," ");
+    if (to){
+      gchar *_find=g_strndup(from, to-from);
+      g_string_replace(data,_find,_replace,1);
+      g_free(_find);
+    }
+  }
+}
+
+void update_definer(GString *statement, gchar *replace_definer_str, gboolean skip_definer){
+  if (g_str_has_prefix(statement->str,"CREATE")){
+    if ( skip_definer )
+      remove_definer(statement);
+    else if (replace_definer_str)
+      replace_definer_from_string(statement,replace_definer_str);
+  }
+}
+
+
+void replace_definer_from_gchar (GString * output_data, char * str, char * _replace){
+  char * from = g_strstr_len(str,50," DEFINER=") + 10;
+  if (from){
+    g_string_append_len(output_data, str, from - str - 1);
+    g_string_append(output_data,_replace);
+    char * to=g_strstr_len(from,110," ");
+    if (to){
+      g_string_append(output_data, to);
+    }
+  }
+}
+
 
 void print_version(const gchar *program){
     GString *str=g_string_new(program);
@@ -1353,10 +1390,15 @@ void discard_mysql_output(MYSQL *conn){
   }
 }
 
+gboolean should_ignore_error_code(guint error_code) {
+  if (ignore_errors_set == NULL) return FALSE;
+  return g_hash_table_contains(ignore_errors_set, GINT_TO_POINTER(error_code));
+}
+
 static void m_log(MYSQL *conn, void log_fun_1(const char *, ...), void log_fun_2(const char *, ...), const char *fmt, va_list args){
   if (fmt && log_fun_1){
     gchar *c=g_strdup_vprintf(fmt,args);
-    if (log_fun_2 && g_list_find(ignore_errors_list, GINT_TO_POINTER(mysql_errno(conn))))
+    if (log_fun_2 && should_ignore_error_code(mysql_errno(conn)))
       log_fun_2("%s - ERROR %d: %s",c, mysql_errno(conn), mysql_error(conn));
     else{
       if (mysql_errno(conn)){

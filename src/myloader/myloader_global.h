@@ -54,6 +54,7 @@ extern gboolean resume;
 extern gboolean serial_tbl_creation;
 extern gboolean shutdown_triggered;
 extern gboolean skip_definer;
+extern gchar *replace_definer;
 extern gboolean skip_post;
 extern gboolean skip_triggers;
 extern gboolean skip_constraints;
@@ -84,7 +85,6 @@ extern guint sequences;
 extern guint sequences_processed;
 extern GMutex sequences_mutex;
 extern unsigned long long int total_data_sql_files;
-extern int (*m_close)(void *file);
 extern GHashTable * set_session_hash;
 
 extern gchar *exec_per_thread;

@@ -36,13 +36,14 @@
 #include "myloader_database.h"
 #include "myloader_table.h"
 GHashTable *tbl_hash=NULL;
-int (*m_close)(void *file) = NULL;
 guint refresh_table_list_interval=100;
 guint refresh_table_list_counter=1;
 gboolean skip_table_sorting = FALSE;
 gchar ** zstd_decompress_cmd = NULL; 
 gchar ** gzip_decompress_cmd = NULL;
 guint max_number_tables_to_sort_in_table_list = 100000;
+
+extern gboolean for_channel_incompatibility;
 
 void initialize_common(){
   refresh_table_list_counter=refresh_table_list_interval;
@@ -103,10 +104,21 @@ void remove_ignore_set_session_from_hash(){
     g_hash_table_remove(set_session_hash,l->data);
     l=l->next;
   }
-
-
 }
 
+gboolean should_ignore_set_statement(GString *data){
+  gboolean r=FALSE;
+  // Perf: Use data->len instead of strlen(data->str)
+  gchar *from_equal=g_strstr_len(data->str, data->len, "=");
+  if (from_equal && ignore_set_list ){
+    *from_equal='\0';
+    gchar * var_name=g_strrstr(data->str," ");
+    var_name++;
+    r=is_in_ignore_set_list(var_name);
+    *from_equal='=';
+  }
+  return r;
+}
 
 gchar *get_value(GKeyFile * kf,gchar *group, const gchar *_key){
   GError *error=NULL;
@@ -243,11 +255,12 @@ void change_master(GKeyFile * kf,gchar *group, struct replication_statements *rs
     g_string_append_printf(aws_change_source,"%d, 0);\n", _source_ssl);
 
   g_strfreev(keys);
-  g_string_append(traditional_change_source," FOR CHANNEL '");
-  if (channel_name!=NULL)
-    g_string_append(traditional_change_source,channel_name);
-  g_string_append(traditional_change_source,"';\n");
-
+  if (!for_channel_incompatibility){
+    g_string_append(traditional_change_source," FOR CHANNEL '");
+    if (channel_name!=NULL)
+      g_string_append(traditional_change_source,channel_name);
+    g_string_append(traditional_change_source,"';\n");
+  }
   if (set_gtid_purge){
     if (! rs->gtid_purge)
       rs->gtid_purge=g_string_new("");
@@ -292,7 +305,7 @@ void change_master(GKeyFile * kf,gchar *group, struct replication_statements *rs
     if (source_gtid){
       g_string_append_printf(rs->start_replica_until,"SQL_AFTER_GTIDS = %s",source_gtid);
     }else{
-      g_string_append_printf(rs->start_replica_until,"SOURCE_LOG_FILE = '%s', SOURCE_LOG_POS = %"G_GINT64_FORMAT, source_log_file, source_log_pos);
+      g_string_append_printf(rs->start_replica_until,"SOURCE_LOG_FILE = %s, SOURCE_LOG_POS = %"G_GINT64_FORMAT, source_log_file, source_log_pos);
     }
     g_string_append(rs->start_replica_until," FOR CHANNEL '");
     if (channel_name!=NULL)
@@ -324,14 +337,31 @@ void change_master(GKeyFile * kf,gchar *group, struct replication_statements *rs
 }
 
 gboolean m_filename_has_suffix(gchar const *str, gchar const *suffix){
+  // Perf: Cache strlen results to avoid calling strlen 9x per invocation
+  // This function is called for every file in dump directory (~750K+ files for 250K tables)
+  gsize str_len = strlen(str);
+  gsize suffix_len = strlen(suffix);
+
   if (has_exec_per_thread_extension(str)){
-    return g_strstr_len(&(str[strlen(str)-strlen(exec_per_thread_extension)-strlen(suffix)]), strlen(str)-strlen(exec_per_thread_extension),suffix) != NULL;
+    gsize ext_len = strlen(exec_per_thread_extension);
+    if (str_len > ext_len + suffix_len) {
+      return g_strstr_len(&(str[str_len - ext_len - suffix_len]), str_len - ext_len, suffix) != NULL;
+    }
+    return FALSE;
   }else if ( g_str_has_suffix(str, GZIP_EXTENSION) ){
-    return g_strstr_len(&(str[strlen(str)-strlen(GZIP_EXTENSION)-strlen(suffix)]), strlen(str)-strlen(GZIP_EXTENSION),suffix) != NULL;
+    gsize ext_len = strlen(GZIP_EXTENSION);
+    if (str_len > ext_len + suffix_len) {
+      return g_strstr_len(&(str[str_len - ext_len - suffix_len]), str_len - ext_len, suffix) != NULL;
+    }
+    return FALSE;
   }else if ( g_str_has_suffix(str, ZSTD_EXTENSION) ){
-    return g_strstr_len(&(str[strlen(str)-strlen(ZSTD_EXTENSION)-strlen(suffix)]), strlen(str)-strlen(ZSTD_EXTENSION),suffix) != NULL;
+    gsize ext_len = strlen(ZSTD_EXTENSION);
+    if (str_len > ext_len + suffix_len) {
+      return g_strstr_len(&(str[str_len - ext_len - suffix_len]), str_len - ext_len, suffix) != NULL;
+    }
+    return FALSE;
   }
-  return g_str_has_suffix(str,suffix);
+  return g_str_has_suffix(str, suffix);
 }
 
 gboolean eval_table( char *db_name, char * table_name, GMutex * mutex){
@@ -446,14 +476,17 @@ void refresh_table_list_without_table_hash_lock(struct configuration *conf, gboo
         table_list=g_list_prepend(table_list,dbt);
         table_lock(dbt);
         if (dbt->schema_state < DATA_DONE)
-          loading_table_list=g_list_insert_sorted(loading_table_list,dbt,&compare_dbt_short);
+          // Perf: Use g_list_prepend (O(1)) instead of g_list_insert_sorted (O(n))
+          // We'll sort the entire list once after the loop - O(n log n) total instead of O(n²)
+          loading_table_list=g_list_prepend(loading_table_list,dbt);
         table_unlock(dbt);
       }
     }
     g_list_free(conf->table_list);
     conf->table_list=table_list;
     g_list_free(conf->loading_table_list);
-    conf->loading_table_list=loading_table_list;
+    // Perf: Single O(n log n) sort instead of O(n²) insert_sorted in loop
+    conf->loading_table_list=g_list_sort(loading_table_list, &compare_dbt_short);
     g_atomic_int_set(&refresh_table_list_counter,refresh_table_list_interval);
     g_mutex_unlock(conf->table_list_mutex);
   }else{

@@ -31,6 +31,7 @@ struct db_table {
   guint64 rows;
   guint64 rows_inserted;
   GList * restore_job_list;
+  gboolean restore_job_list_sorted;  // Perf: lazy sorting flag
   guint current_threads;
   guint max_threads;
   guint max_connections_per_job;
@@ -53,6 +54,8 @@ struct db_table {
   gchar *triggers_checksum;
   gboolean is_view;
   gboolean is_sequence;
+  // O(1) ready queue flag: prevents duplicate enqueuing
+  gboolean in_ready_queue;
 };
 
 struct db_table * get_table(gchar *database_name_in_filename , gchar * table_filename);

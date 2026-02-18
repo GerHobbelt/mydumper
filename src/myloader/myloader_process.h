@@ -22,6 +22,7 @@ struct fifo{
   gchar *filename;
   gchar *stdout_filename;
   GMutex *mutex;
+  gboolean uses_decompressor;  // Track if this file uses a decompression slot
 };
 
 void initialize_process(struct configuration *c);
@@ -35,6 +36,7 @@ gboolean process_data_filename(char * filename);
 gboolean process_schema_view_filename(gchar *filename);
 gboolean process_schema_sequence_filename(gchar *filename);
 
-void process_metadata_global_filename(gchar *file, GOptionContext * local_context);
+void process_metadata_global_filename(gchar *file, GOptionContext * local_context, gboolean is_global);
 FILE * myl_open(char *filename, const char *type);
 void myl_close(const char *filename, FILE *file, gboolean rm);
+gint cmp_restore_job(gconstpointer rj1, gconstpointer rj2);

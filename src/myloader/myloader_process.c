@@ -46,6 +46,12 @@ struct configuration *_conf;
 extern gboolean schema_sequence_fix;
 GAsyncQueue *partial_metadata_queue = NULL;
 
+// Decompression throttle: limit concurrent decompressor processes
+static GCond *decompress_cond = NULL;
+static GMutex *decompress_mutex = NULL;
+static guint active_decompressors = 0;
+static guint max_decompressors = 0;
+
 void initialize_process(struct configuration *c){
   partial_metadata_queue=g_async_queue_new();
   replication_statements=g_new(struct replication_statements,1);
@@ -57,6 +63,23 @@ void initialize_process(struct configuration *c){
   _conf=c;
   fifo_hash=g_hash_table_new(g_direct_hash,g_direct_equal);
   fifo_table_mutex = g_mutex_new();
+
+  // Initialize decompression throttle
+  decompress_cond = g_cond_new();
+  decompress_mutex = g_mutex_new();
+  // Limit concurrent decompressors to num_threads, capped at 32
+  max_decompressors = num_threads;
+  if (max_decompressors > 32) max_decompressors = 32;
+  if (max_decompressors < 4) max_decompressors = 4;
+  max_decompressors=max_decompressors;
+}
+
+// Release a decompressor slot
+static void release_decompressor_slot(void){
+  g_mutex_lock(decompress_mutex);
+  g_atomic_int_inc(&active_decompressors);
+  g_cond_signal(decompress_cond);
+  g_mutex_unlock(decompress_mutex);
 }
 
 FILE * myl_open(char *filename, const char *type){
@@ -66,8 +89,15 @@ FILE * myl_open(char *filename, const char *type){
   (void) child_proc;
   gchar **command=NULL;
   struct stat a;
-  if (get_command_and_basename(filename, &command,&basename)){
-
+  trace("myl_open %s", filename);
+  if (get_command_and_basename(filename, &command, &basename)){
+    // Acquire decompressor slot (throttle concurrent processes)
+    g_mutex_lock(decompress_mutex);
+    while (g_atomic_int_dec_and_test(&active_decompressors)){
+      g_atomic_int_inc(&active_decompressors);
+      g_cond_wait(decompress_cond, decompress_mutex);
+    }
+    g_mutex_unlock(decompress_mutex);
 
     fifoname=basename;
     if (fifo_directory != NULL){
@@ -87,11 +117,26 @@ FILE * myl_open(char *filename, const char *type){
       }
     }
     if (mkfifo(fifoname,0666)){
-      g_critical("cannot create named pipe %s (%d)", fifoname, errno); 
+      g_critical("cannot create named pipe %s (%d)", fifoname, errno);
     }
 
     child_proc = execute_file_per_thread(filename, fifoname, command);
     file=g_fopen(fifoname,type);
+
+    // Issue #2075: Unlink FIFO immediately after both ends are connected.
+    // Once fopen succeeds, both our process and the subprocess have the FIFO open.
+    // The pipe remains usable through the open file descriptors.
+    // This ensures automatic cleanup on crash (no stale FIFOs left behind).
+    if (file != NULL) {
+      g_unlink(fifoname);
+//      m_remove0(fifo_directory,fifoname);
+    }
+    if (stream && !no_delete)
+      g_unlink(filename);
+/*    gchar *tmpbasename=g_path_get_basename(filename);
+    m_remove(directory,tmpbasename);
+    g_free(tmpbasename);
+*/
     g_mutex_lock(fifo_table_mutex);
     struct fifo *f=g_hash_table_lookup(fifo_hash,file);
     if (f!=NULL){
@@ -100,6 +145,7 @@ FILE * myl_open(char *filename, const char *type){
       f->pid = child_proc;
       f->filename=g_strdup(filename);
       f->stdout_filename=fifoname;
+      f->uses_decompressor=TRUE;
     }else{
       f=g_new0(struct fifo, 1);
       f->mutex=g_mutex_new();
@@ -107,6 +153,7 @@ FILE * myl_open(char *filename, const char *type){
       f->pid = child_proc;
       f->filename=g_strdup(filename);
       f->stdout_filename=fifoname;
+      f->uses_decompressor=TRUE;
       g_hash_table_insert(fifo_hash,file,f);
       g_mutex_unlock(fifo_table_mutex);
     }
@@ -118,12 +165,15 @@ FILE * myl_open(char *filename, const char *type){
       file=NULL;
     }else{
       file=g_fopen(filename, type);
+      if (stream && !no_delete)
+        g_unlink(filename);
     }
   }
   return file;
 }
 
 void myl_close(const char *filename, FILE *file, gboolean rm){
+  trace("myl_close %s", filename);
   g_mutex_lock(fifo_table_mutex);
   struct fifo *f=g_hash_table_lookup(fifo_hash,file);
   g_mutex_unlock(fifo_table_mutex);
@@ -136,11 +186,19 @@ void myl_close(const char *filename, FILE *file, gboolean rm){
     g_mutex_unlock(f->mutex);
     g_mutex_unlock(fifo_table_mutex);
 
-    remove(f->stdout_filename);
+    // Issue #2075: FIFO is already unlinked in myl_open() after both ends connect.
+    // No need to remove here - the FIFO name no longer exists on filesystem.
+
+    // Release decompressor slot
+    if (f->uses_decompressor){
+      release_decompressor_slot();
+    }
   }
-  if (rm){
-    m_remove(NULL,filename);
-  }
+  (void) rm;
+  (void) filename;
+//  if (rm){
+//    m_remove(NULL,filename);
+//  }
 }
 
 void process_tablespace_filename(char * filename) {
@@ -210,7 +268,7 @@ regex_error:
               goto regex_error;
             g_free(expr);
 //          }
-          if ( g_str_has_prefix(dbt->table_filename,"mydumper_") && !dbt->source_table_name){
+          if ( g_str_has_prefix(dbt->table_filename,"mydumper_") || !dbt->source_table_name){
             dbt->source_table_name=dbt->create_table_name;
 //            g_hash_table_insert(tbl_hash, dbt->table_filename, dbt->source_table_name);
 //          }else{
@@ -234,8 +292,10 @@ regex_error:
           GString *alter_table_constraint_statement=g_string_sized_new(512);
           // Check if it is a /*!40  SET
           if (g_strrstr(data->str,"/*!40")){
-            g_string_append(alter_table_statement,data->str);
-            g_string_append(create_table_statement,data->str);
+            if (!should_ignore_set_statement(data)){
+              g_string_append(alter_table_statement,data->str);
+              g_string_append(create_table_statement,data->str);
+            }
           }else{
             // Processing CREATE TABLE statement
             int flag = // process_create_table_statement(data->str, create_table_statement, alter_table_statement, alter_table_constraint_statement, dbt, (dbt->rows == 0 || dbt->rows >= 1000000 || skip_constraints || skip_indexes));
@@ -285,7 +345,8 @@ regex_error:
   }
 
   g_string_free(data,TRUE);
-  trace("parse_create_table_from_file ended on %s", filename); 
+  myl_close(filename, infile, FALSE);  // Close file to release decompressor slot
+  trace("parse_create_table_from_file ended on %s", filename);
   return schema_push( SCHEMA_TABLE_JOB, filename, JOB_TO_CREATE_TABLE, dbt, dbt->database, create_table_statement, CREATE_TABLE, dbt->database );
 
 }
@@ -504,15 +565,17 @@ gboolean process_table_filename(char * filename){
 
 gboolean first_metadata_processed=FALSE;
 
-void process_metadata_global_filename(gchar *file, GOptionContext * local_context)
+void process_metadata_global_filename(gchar *file, GOptionContext * local_context, gboolean is_global)
 {
+  set_thread_name("MDT");
+
   gchar *path = g_build_filename(directory, file, NULL);
+  trace("Reading metadata: %s", path);
   GKeyFile * kf = load_config_file(path);
+  g_free(path);
   if (kf==NULL)
     g_error("Global metadata file processing was not possible");
 
-  set_thread_name("MDT");
-  message("Reading metadata: %s", file);
   guint j=0;
   gchar *value=NULL;
   gchar *real_table_name=NULL;
@@ -525,8 +588,10 @@ void process_metadata_global_filename(gchar *file, GOptionContext * local_contex
   const char *delimiter=    identifier_quote_character == BACKTICK ? delim_bt : delim_dq;
   const char *wrong_quote=  identifier_quote_character == BACKTICK ? "\"" : "`";
 
+  if (is_global){
+    m_remove(directory, file);
 
-  if (g_key_file_has_group(kf, CONFIG)){
+    if (g_key_file_has_group(kf, CONFIG)){
       gsize len=0;
       GError *error = NULL;
       gchar ** keys=g_key_file_get_keys(kf,CONFIG, &len, &error);
@@ -555,7 +620,7 @@ void process_metadata_global_filename(gchar *file, GOptionContext * local_contex
         if (!g_option_context_parse(local_context, &slen, &gclist, &error)) {
           m_critical("option parsing failed: %s, try --help\n", error->message);
         }else{
-          g_message("Config file loaded");
+          trace("Config file loaded");
         }
         g_strfreev(gclist);
       }
@@ -572,15 +637,20 @@ void process_metadata_global_filename(gchar *file, GOptionContext * local_contex
       }else{
         m_critical("Wrong quote_character in metadata");
       }
-      trace("metadata: quote character is %c", identifier_quote_character);  
+      trace("metadata: quote character is %c", identifier_quote_character);
       first_metadata_processed=TRUE;
-  }else if (!first_metadata_processed){
-    if (g_strstr_len(file,-1,"partial")){
+    }else{
+      m_error("Section [config] was not found on metadata file: %s", file);
+    }
+  }else{
+    if (!first_metadata_processed){
       g_async_queue_push(partial_metadata_queue,file);
       return;
     }
-    m_error("Section [config] was not found on metadata file");
+    m_remove(directory, file);
   }
+
+  g_free(file);
 
   if (g_key_file_has_group(kf, "myloader_session_variables")){
     g_message("myloader_session_variables found on metadata");
@@ -635,6 +705,10 @@ void process_metadata_global_filename(gchar *file, GOptionContext * local_contex
           if (get_value(kf,groups[j],"rows")){
             dbt->rows=g_ascii_strtoull(get_value(kf,groups[j],"rows"),NULL, 10);
           }
+          if (value) g_free(value);
+          if (get_value(kf,groups[j],"is_view")){
+            dbt->is_view=g_ascii_strtoull(get_value(kf,groups[j],"is_view"),NULL, 10);
+          }
         }
       } else {
         database_table[0][strlen(database_table[0])-1]='\0';
@@ -659,12 +733,9 @@ void process_metadata_global_filename(gchar *file, GOptionContext * local_contex
   if (stream)
     metadata_has_been_processed();
 
-  m_remove(directory, file);
-  g_free(file);
-
   file=g_async_queue_try_pop(partial_metadata_queue);
   if (file)
-    process_metadata_global_filename(file, local_context);
+    process_metadata_global_filename(file, local_context, FALSE);
 
 }
 
@@ -712,17 +783,22 @@ gboolean process_schema_post_filename(gchar *filename, enum restore_job_statemen
   return TRUE; // SCHEMA_VIEW
 }
 
-static
+// Perf: Made non-static for lazy sorting in myloader_worker_loader_main.c
 gint cmp_restore_job(gconstpointer rj1, gconstpointer rj2){
-  if (((struct restore_job *)rj1)->data.drj->part != ((struct restore_job *)rj2)->data.drj->part ){
-    guint a=((struct restore_job *)rj1)->data.drj->part, b=((struct restore_job *)rj2)->data.drj->part;
-    while ( a%2 == b%2 ){
-      a=a>>1;
-      b=b>>1;
-    }
-    return a%2 > b%2;
+  guint a = ((struct restore_job *)rj1)->data.drj->part;
+  guint b = ((struct restore_job *)rj2)->data.drj->part;
+  if (a != b) {
+    // Perf: Use __builtin_clz (single CPU instruction) instead of bit-shift loop
+    // Find the highest differing bit between a and b using XOR
+    guint diff = a ^ b;
+    // Count leading zeros to find the position of the highest set bit in diff
+    // Then compare that bit in a and b to determine ordering
+    int bit_pos = (sizeof(guint) * 8 - 1) - __builtin_clz(diff);
+    return ((a >> bit_pos) & 1) > ((b >> bit_pos) & 1) ? 1 : -1;
   }
-  return ((struct restore_job *)rj1)->data.drj->sub_part > ((struct restore_job *)rj2)->data.drj->sub_part;
+  guint sub_a = ((struct restore_job *)rj1)->data.drj->sub_part;
+  guint sub_b = ((struct restore_job *)rj2)->data.drj->sub_part;
+  return (sub_a > sub_b) ? 1 : (sub_a < sub_b) ? -1 : 0;
 }
 
 gboolean process_data_filename(char * filename){
@@ -756,9 +832,10 @@ gboolean process_data_filename(char * filename){
     struct restore_job *rj = new_data_restore_job( g_strdup(filename), JOB_RESTORE_FILENAME, dbt, part, sub_part);
     table_lock(dbt);
     g_atomic_int_add(&(dbt->remaining_jobs), 1);
-    dbt->count++; 
-    dbt->restore_job_list=g_list_insert_sorted(dbt->restore_job_list,rj,&cmp_restore_job);
-//  dbt->restore_job_list=g_list_append(dbt->restore_job_list,rj);
+    dbt->count++;
+    // Perf: Use O(1) prepend instead of O(n) insert_sorted. Sort lazily before consumption.
+    dbt->restore_job_list=g_list_prepend(dbt->restore_job_list, rj);
+    dbt->restore_job_list_sorted = FALSE;
     table_unlock(dbt);
 	}else{
     g_warning("Ignoring file %s on `%s`.`%s`",filename, dbt->database->source_database, dbt->table_filename);

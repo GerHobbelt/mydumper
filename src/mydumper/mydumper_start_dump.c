@@ -401,7 +401,7 @@ MYSQL *create_main_connection(GOptionContext *context) {
   set_global = g_string_new(NULL);
   set_global_back = g_string_new(NULL);
   server_detect(conn);
-  load_options_for_product_from_key_file(key_file, context, "mydumper", get_product(), get_major(), get_secondary(), get_revision());
+  load_options_for_product_from_key_file(key_file, context, "mydumper", get_major(), get_secondary(), get_revision());
   GHashTable * set_session_hash = mydumper_initialize_hash_of_session_variables();
   GHashTable * set_global_hash = g_hash_table_new ( g_str_hash, g_str_equal );
   if (key_file != NULL ){
@@ -664,13 +664,15 @@ void determine_ddl_lock_function(MYSQL ** conn, void(**acquire_global_lock_funct
       }
       break;
     case SERVER_TYPE_MARIADB:
-      if ((get_major() == 10 && get_secondary() >= 5) || get_major() > 10) {
+      if (((get_major() == 10 && get_secondary() >= 5) || get_major() > 10) && sync_thread_lock_mode!=FTWRL && !skip_ddl_locks ) {
+
         *acquire_ddl_lock_function = &send_mariadb_backup_locks;
 //            *release_ddl_lock_function = &send_backup_stage_end;
         *release_ddl_lock_function = NULL;
 
         *acquire_global_lock_function = &send_backup_stage_on_block_commit;
         *release_global_lock_function = &send_backup_stage_end;
+
       }else{
         default_locking( acquire_global_lock_function, release_global_lock_function, acquire_ddl_lock_function, release_ddl_lock_function, release_binlog_function);
       }
@@ -699,6 +701,8 @@ void print_dbt_on_metadata_gstring(struct db_table *dbt, GString *data){
   g_free(table);
   if (dbt->is_sequence)
     g_string_append_printf(data,"is_sequence = 1\n");
+  if (dbt->is_view)
+    g_string_append_printf(data,"is_view = 1\n");
   if (dbt->data_checksum)
     g_string_append_printf(data,"data_checksum = %s\n", dbt->data_checksum);
   if (dbt->schema_checksum)
@@ -901,13 +905,12 @@ void start_dump(struct configuration *conf, GOptionContext *context) {
   check_num_threads();
   g_message("Using %u dumper threads", num_threads);
 
-  initialize_connection(MYDUMPER);
-  conn = create_main_connection(context);
-
   initialize_start_dump();
   initialize_common();
   initialize_create_jobs(conf);
+  initialize_connection(MYDUMPER);
   initialize_masquerade();
+  conn = create_main_connection(context);
 
   /* Give ourselves an array of tables to dump */
   if (tables_list)
@@ -1318,13 +1321,21 @@ void start_dump(struct configuration *conf, GOptionContext *context) {
   wait_close_files();
 
   GList *keys= g_hash_table_get_keys(all_dbts);
-  keys= g_list_sort(keys, key_strcmp);
+  // Skip sorting when --skip-metadata-sorting is specified
+  // Sorting 250K keys takes O(n*log(n)) = ~4.5M comparisons
+  if (!skip_metadata_sorting) {
+    keys= g_list_sort(keys, key_strcmp);
+  }
   for (GList *it= keys; it; it= g_list_next(it)) {
     dbt= (struct db_table *) g_hash_table_lookup(all_dbts, it->data);
     g_assert(dbt);
     print_dbt_on_metadata(mdfile, dbt);
   }
-  write_database_on_disk(mdfile);
+  if (skip_metadata_sorting) {
+    write_database_on_disk_unsorted(mdfile);
+  } else {
+    write_database_on_disk(mdfile);
+  }
   g_list_free(table_schemas);
   table_schemas=NULL;
   g_async_queue_unref(conf->transactional.defer);

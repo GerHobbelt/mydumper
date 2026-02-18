@@ -89,7 +89,7 @@ gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointe
       checksum_mode= CHECKSUM_SKIP;
       return TRUE;
     }
-    g_critical("--checksum accepts: fail (default), warn, skip");
+    g_critical("--checksum accepts: fail, warn (default), skip");
   } else if (!g_strcmp0(option_name, "--ignore-set")){
     gchar** ignore_set_items= g_strsplit(value, ",", 0);
     guint i=0;
@@ -98,10 +98,10 @@ gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointe
     g_strfreev(ignore_set_items);
     return TRUE;
   } else if (!g_strcmp0(option_name, "--overwrite-tables")){
-    m_error("Option --overwrite-tables has been deprecated. User -o/--drop-table instead");
+    m_error("Option --overwrite-tables has been deprecated. Use -o/--drop-table instead");
     return FALSE;
   } else if (!g_strcmp0(option_name, "--purge-mode")){
-    m_error("Option --purge-mode has been deprecated. User -o/--drop-table instead");
+    m_error("Option --purge-mode has been deprecated. Use -o/--drop-table instead");
     return FALSE;
   } else if (!g_strcmp0(option_name, "--drop-table") || !g_strcmp0(option_name, "-o")){
     overwrite_tables=TRUE;
@@ -196,7 +196,7 @@ static GOptionEntry execution_entries[] = {
     { "disable-redo-log", 0, 0, G_OPTION_ARG_NONE, &disable_redo_log,
       "Disables the REDO_LOG and enables it after, doesn't check initial status", NULL },
     {"checksum", 0, G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK , &arguments_callback,
-      "Treat checksums: skip, fail(default), warn.", NULL },
+      "Treat checksums: skip, fail, warn(default).", NULL },
     {"drop-database", 0, 0, G_OPTION_ARG_NONE, &drop_database,
       "Executes a DROP DATABASE if the schema database file is found. ", NULL},
     {"drop-table", 'o', G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK , &arguments_callback,
@@ -204,7 +204,7 @@ static GOptionEntry execution_entries[] = {
       "If the option is not set, the default is set to: FAIL. "
       "If the option is used without a parameter, the default is: DROP.", NULL},
     {"overwrite-tables", 0, 0, G_OPTION_ARG_NONE, &overwrite_tables,
-      "Option --overwrite-tables has been deprecated. User -o/--drop-table instead.", NULL},
+      "Option --overwrite-tables has been deprecated. Use -o/--drop-table instead.", NULL},
     {"overwrite-unsafe", 0, 0, G_OPTION_ARG_NONE, &overwrite_unsafe,
       "Same as --overwrite-tables but starts data load as soon as possible. May cause InnoDB deadlocks for foreign keys.", NULL},
     {"retry-count", 0, 0, G_OPTION_ARG_INT, &retry_count,
@@ -256,6 +256,8 @@ static GOptionEntry statement_entries[] ={
       "Sets the names, use it at your own risk, default binary", NULL },
     {"skip-definer", 0, 0, G_OPTION_ARG_NONE, &skip_definer,
      "Removes DEFINER from the CREATE statement. By default, statements are not modified", NULL},
+    {"replace-definer", 0, 0, G_OPTION_ARG_STRING, &replace_definer,
+     "Replaces the user in the DEFINER by the new string. By default, statements are not modified", NULL},
     {"ignore-set", 0, 0, G_OPTION_ARG_CALLBACK, &arguments_callback, 
       "List of variables that will be ignored from the header of SET", NULL},
     {NULL, 0, 0, G_OPTION_ARG_NONE, NULL, NULL, NULL}};

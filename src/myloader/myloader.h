@@ -106,6 +106,8 @@ struct configuration {
   GList *checksum_list;
   GMutex *mutex;
   GAsyncQueue *index_queue;
+  // O(1) ready table queue: tables with pending jobs ready for dispatch
+  GAsyncQueue *ready_table_queue;
   int done;
   GOptionContext * context;
 };
@@ -139,6 +141,7 @@ const char * status2str(enum schema_status status)
 
 enum file_type { 
   METADATA_GLOBAL,
+  METADATA_PARTIAL,
   RESUME,
   SCHEMA_TABLESPACE, 
   SCHEMA_SEQUENCE,
@@ -158,6 +161,8 @@ const char *ft2str(enum file_type ft){
   switch (ft) {
   case METADATA_GLOBAL:
     return "METADATA_GLOBAL";
+  case METADATA_PARTIAL:
+    return "METADATA_PARTIAL";
   case RESUME:
     return "RESUME";
   case SCHEMA_TABLESPACE:

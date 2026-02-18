@@ -47,7 +47,7 @@ gboolean views_as_tables=FALSE;
 gboolean no_dump_sequences = FALSE;
 gboolean dump_checksums = FALSE;
 gboolean data_checksums = FALSE;
-gboolean schema_checksums = FALSE;
+gboolean schema_checksums = TRUE;  // Issue #1975: Enable schema checksums by default
 gboolean routine_checksums = FALSE;
 gboolean exit_if_broken_table_found = FALSE;
 int build_empty_files = 0;
@@ -96,6 +96,8 @@ void initialize_working_thread(){
   non_transactional_table=g_new(struct MList, 1);
   transactional_table->list=NULL;
   non_transactional_table->list=NULL;
+  transactional_table->count=0;
+  non_transactional_table->count=0;
   non_transactional_table->mutex = g_mutex_new();
   transactional_table->mutex = g_mutex_new();
 
@@ -863,7 +865,7 @@ void new_table_to_dump(MYSQL *conn, struct configuration *conf, gboolean is_view
 */
 
   struct db_table *dbt=NULL;
-  gboolean b= new_db_table(&dbt, conn, conf, database, table, collation, is_sequence);
+  gboolean b= new_db_table(&dbt, conn, conf, database, table, collation, is_sequence, is_view);
   if (b){
   // if a view or sequence we care only about schema
   if ((!is_view || views_as_tables ) && !is_sequence) {
@@ -888,12 +890,14 @@ void new_table_to_dump(MYSQL *conn, struct configuration *conf, gboolean is_view
           dbt->is_transactional=TRUE;
           g_mutex_lock(transactional_table->mutex);
           transactional_table->list=g_list_prepend(transactional_table->list,dbt);
+          transactional_table->count++;
           g_mutex_unlock(transactional_table->mutex);
 
         } else {
           dbt->is_transactional=FALSE;
           g_mutex_lock(non_transactional_table->mutex);
           non_transactional_table->list = g_list_prepend(non_transactional_table->list, dbt);
+          non_transactional_table->count++;
           g_mutex_unlock(non_transactional_table->mutex);
         }
       }else{
@@ -901,6 +905,7 @@ void new_table_to_dump(MYSQL *conn, struct configuration *conf, gboolean is_view
           dbt->is_transactional=FALSE;
           g_mutex_lock(non_transactional_table->mutex);
           non_transactional_table->list = g_list_prepend(non_transactional_table->list, dbt);
+          non_transactional_table->count++;
           g_mutex_unlock(non_transactional_table->mutex);
         }
       }
