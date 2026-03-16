@@ -34,6 +34,8 @@
 #include "myloader_restore.h"
 #include "myloader_database.h"
 
+extern gboolean dry_run;
+
 struct statement * new_statement();
 guint64 max_transaction_size=DEFAULT_MAX_TRANSACTION_SIZE;
 gboolean skip_definer = FALSE;
@@ -195,6 +197,7 @@ void reconnect_connection_data(struct connection_data *cd){
 
 int restore_data_in_gstring_by_statement(struct connection_data *cd, GString *data, gboolean is_schema, guint *query_counter)
 {
+  if (!dry_run){
   guint en=mysql_real_query(cd->thrconn, data->str, data->len);
   if (en) {
     if (is_schema)
@@ -224,6 +227,7 @@ int restore_data_in_gstring_by_statement(struct connection_data *cd, GString *da
         return 1;
       }
     }
+  }
   }
   *query_counter=*query_counter+1;
   g_string_set_size(data, 0);
@@ -695,9 +699,9 @@ int restore_data_from_mydumper_file(struct thread_data *td, const char *filename
 //          int load_data_child_pid = 0;  // Issue #2075: Track subprocess for FIFO unlink
           gboolean is_fifo = get_command_and_basename(load_data_filename, &command, &load_data_fifo_filename);
           if (is_fifo){
-            if (fifo_directory != NULL){
+            if (load_data_tmp_directory != NULL){
               new_data = g_string_new_len(data->str, from - data->str);
-              g_string_append(new_data, fifo_directory);
+              g_string_append(new_data, load_data_tmp_directory);
               g_string_append_c(new_data, '/');
               g_string_append(new_data, from);
               // Perf: Use strchr instead of g_strstr_len for single-char search
@@ -716,8 +720,8 @@ int restore_data_from_mydumper_file(struct thread_data *td, const char *filename
             }
             *to='\'';
 
-            if (fifo_directory != NULL){
-              new_load_data_fifo_filename=g_strdup_printf("%s/%s", fifo_directory, load_data_fifo_filename);
+            if (load_data_tmp_directory != NULL){
+              new_load_data_fifo_filename=g_strdup_printf("%s/%s", load_data_tmp_directory, load_data_fifo_filename);
               g_free(load_data_fifo_filename);
               load_data_fifo_filename=new_load_data_fifo_filename;
             }

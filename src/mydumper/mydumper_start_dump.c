@@ -62,7 +62,7 @@ GList *schema_post = NULL;
 gboolean it_is_a_consistent_backup = FALSE;
 GHashTable *all_dbts=NULL;
 char * (*identifier_quote_character_protect)(char *r);
-struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 gboolean replica_stopped = FALSE;
 gboolean merge_dumpdir= FALSE;
 gboolean clear_dumpdir= FALSE;
@@ -651,6 +651,7 @@ void determine_ddl_lock_function(MYSQL ** conn, void(**acquire_global_lock_funct
       m_critical("We support LOCK_ALL and SAFE_NO_LOCK modes for RDS/Aurora. Select one of them to configure --sync-thread-lock-mode");
       break;
     case SERVER_TYPE_MYSQL: 
+    case SERVER_TYPE_GOOGLE:
       switch (get_major()) {
         case 8:
           *acquire_ddl_lock_function = &send_ddl_lock_instance_backup;
@@ -1033,6 +1034,7 @@ void start_dump(struct configuration *conf, GOptionContext *context) {
       break;
     case LOCK_ALL:
       send_lock_all_tables(conn);
+      release_global_lock_function = &send_unlock_tables;
       break;
     case AUTO:
       determine_ddl_lock_function(&second_conn, &acquire_global_lock_function,&release_global_lock_function, &acquire_ddl_lock_function, &release_ddl_lock_function, &release_binlog_function);

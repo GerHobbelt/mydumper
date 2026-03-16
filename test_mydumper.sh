@@ -95,13 +95,15 @@ export G_DEBUG=fatal-criticals
 > $mydumper_log
 > $myloader_log
 
-optstring_long="case:,rr-myloader,rr-mydumper,debug,prepare,directories:,retry:"
+optstring_long="case:,rr-myloader,rr-mydumper,debug,skip-dynamic,skip-backup,prepare,directories:,retry:"
 optstring_short="ce:LDd"
 
 opts=$(getopt -o "${optstring_short}" --long "${optstring_long}" --name "$0" -- "$@") ||
     exit $?
 eval set -- "$opts"
 
+unset skip_dynamic
+unset skip_backup
 unset prepare_only
 unset case_num
 unset case_repeat
@@ -158,6 +160,12 @@ do
   --directories)
     directories=$2
     shift 2;;
+  --skip-dynamic)
+    skip_dynamic=1
+    shift;;
+  --skip-backup)
+    skip_backup=1
+    shift;;
   --prepare)
     prepare_only=1
     shift;;
@@ -233,6 +241,7 @@ test_case_dir (){
 
   mydumper_prepare_database="${DIR}/prepare_mydumper.sql"
   mydumper_check="${DIR}/check_mydumper.sh"
+  myloader_prepare_database="${DIR}/prepare_myloader.sql"
   myloader_pre_execution="${DIR}/pre_myloader.sh"
   myloader_clean_database="${DIR}/clean_databases.sql"
 
@@ -296,7 +305,9 @@ test_case_dir (){
     done
     if (( $error > 0 )) && (( $iter > $retries ))
     then
-      mysqldump --all-databases > $mysqldumplog
+      if [[ ! -n "$skip_backup"  ]]; then
+        mysqldump --all-databases > $mysqldumplog
+      fi
       echo "Error running: $mydumper ${mydumper_parameters}"
       #cat $tmp_mydumper_log
       mv $tmp_mydumper_log $mydumper_stor_dir
@@ -310,6 +321,12 @@ test_case_dir (){
   else
     mysql < test/clean_databases.sql
   fi
+  if [ -f $myloader_prepare_database ]
+  then
+    mysql < $myloader_prepare_database
+  else
+    prepare_database_in_directory ${DIR}
+  fi
   if [ -f $myloader_pre_execution ]
   then
     "$myloader_pre_execution"
@@ -322,7 +339,9 @@ test_case_dir (){
     do
       # Import
       echo "Importing database: ${myloader_parameters}"
-      mysqldump --all-databases > $mysqldumplog
+      if [[ ! -n "$skip_backup"  ]]; then
+        mysqldump --all-databases > $mysqldumplog
+      fi
       if (( $myloader_stream >= 1 ))
       then
         "${time2[@]}" $myloader ${myloader_parameters} < /tmp/stream.sql
@@ -351,7 +370,9 @@ test_case_dir (){
     if (( $error > 0 )) && (( $iter > $retries ))
     then
       mkdir -p $mydumper_stor_dir
-      mv $mysqldumplog $mydumper_stor_dir
+      if [[ ! -n "$skip_backup"  ]]; then
+        mv $mysqldumplog $mydumper_stor_dir
+      fi
       echo "Error running: $myloader ${myloader_parameters}"
       echo "Error running myloader with mydumper: $mydumper ${mydumper_parameters}"
 #      cat $tmp_mydumper_log
@@ -559,7 +580,11 @@ if [[ -n "$prepare_only"  ]]; then
   exit
 fi
 
-full_dynamic_tests && full_test_global &&
+if [[ ! -n "$skip_dynamic"  ]]; then
+  full_dynamic_tests
+fi
+
+full_test_global &&
   finish
 
 #cat $mydumper_log

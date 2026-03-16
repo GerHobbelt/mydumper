@@ -40,6 +40,7 @@ GHashTable *ignore_errors_set=NULL;
 GAsyncQueue *stream_queue = NULL;
 gboolean use_defer= FALSE;
 gboolean check_row_count= FALSE;
+extern gboolean dry_run;
 extern gchar **optimize_key_engines;
 guint throttle_time=0;
 guint throttle_max_usleep_limit=60000000;
@@ -250,6 +251,10 @@ void load_per_table_info_from_key_file(GKeyFile *kf, struct configuration_per_ta
             value = g_key_file_get_value(kf,groups[i],keys[j],&error);
             g_hash_table_insert(cpt->all_object_to_export, g_strdup(groups[i]), g_strdup(value));
           }
+          if (g_strcmp0(keys[j],"object_to_import") == 0){
+            value = g_key_file_get_value(kf,groups[i],keys[j],&error);
+            g_hash_table_insert(cpt->all_object_to_import, g_strdup(groups[i]), g_strdup(value));
+          }
           if (g_strcmp0(keys[j],"partition_regex") == 0){
             value = g_key_file_get_value(kf,groups[i],keys[j],&error);
             pcre2_code *r=NULL; 
@@ -408,9 +413,8 @@ void execute_gstring(MYSQL *conn, GString *ss)
     gchar** line=g_strsplit(ss->str, ";\n", -1);
     int i=0;
     for (i=0; i < (int)g_strv_length(line);i++){
-       if (strlen(line[i]) > 3 && mysql_query(conn, line[i])){
-         g_warning("Set session failed: %s",line[i]);
-       }
+       if (strlen(line[i]) > 3)
+         m_query_warning(conn, line[i], "Set session failed: %s",line[i] );
     }
     g_strfreev(line);
   }
@@ -805,6 +809,11 @@ gboolean stream_arguments_callback(const gchar *option_name,const gchar *value, 
     }
     if (!g_ascii_strcasecmp(value,"NO_STREAM")){
       no_stream=TRUE;
+      return TRUE;
+    }
+    if (!g_ascii_strcasecmp(value,"UNPACK")){
+      no_delete=TRUE;
+      dry_run=TRUE; 
       return TRUE;
     }
 
@@ -1306,6 +1315,7 @@ void initialize_conf_per_table(struct configuration_per_table *cpt){
   cpt->all_columns_on_insert_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
 
   cpt->all_object_to_export=g_hash_table_new ( g_str_hash, g_str_equal );
+  cpt->all_object_to_import=g_hash_table_new ( g_str_hash, g_str_equal );
 
   cpt->all_partition_regex_per_table=g_hash_table_new ( g_str_hash, g_str_equal );
 
@@ -1322,34 +1332,34 @@ gboolean str_list_has_str(gchar ** str_list, const gchar* str){
   return FALSE;
 }
 
-void parse_object_to_export(struct object_to_export *object_to_export,gchar *val){
-  object_to_export->no_data=FALSE;
-  object_to_export->no_schema=FALSE;
-  object_to_export->no_view=FALSE;
-  object_to_export->no_trigger=FALSE;
-  object_to_export->no_index=FALSE;
-  object_to_export->no_constraint=FALSE;
+void parse_object_scope(struct object_scope *object_scope,gchar *val){
+  object_scope->no_data=FALSE;
+  object_scope->no_schema=FALSE;
+  object_scope->no_view=FALSE;
+  object_scope->no_trigger=FALSE;
+  object_scope->no_index=FALSE;
+  object_scope->no_constraint=FALSE;
   if (!val)
     return;
   gchar **split_option = g_strsplit(val, ",", 4);
-  object_to_export->no_data=!str_list_has_str(split_option,"DATA");
-  object_to_export->no_schema=!str_list_has_str(split_option,"SCHEMA");
-  object_to_export->no_trigger=!str_list_has_str(split_option,"TRIGGER");
+  object_scope->no_data=!str_list_has_str(split_option,"DATA");
+  object_scope->no_schema=!str_list_has_str(split_option,"SCHEMA");
+  object_scope->no_trigger=!str_list_has_str(split_option,"TRIGGER");
   if (str_list_has_str(split_option,"ALL")){
-    object_to_export->no_data=FALSE;
-    object_to_export->no_schema=FALSE;
-    object_to_export->no_view=FALSE;
-    object_to_export->no_index=FALSE;
-    object_to_export->no_constraint=FALSE;
-    object_to_export->no_trigger=FALSE;
+    object_scope->no_data=FALSE;
+    object_scope->no_schema=FALSE;
+    object_scope->no_view=FALSE;
+    object_scope->no_index=FALSE;
+    object_scope->no_constraint=FALSE;
+    object_scope->no_trigger=FALSE;
   }
   if (str_list_has_str(split_option,"NONE")){
-    object_to_export->no_data=TRUE;
-    object_to_export->no_schema=TRUE;
-    object_to_export->no_view=TRUE;
-    object_to_export->no_index=TRUE;
-    object_to_export->no_constraint=TRUE;
-    object_to_export->no_trigger=TRUE;
+    object_scope->no_data=TRUE;
+    object_scope->no_schema=TRUE;
+    object_scope->no_view=TRUE;
+    object_scope->no_index=TRUE;
+    object_scope->no_constraint=TRUE;
+    object_scope->no_trigger=TRUE;
   }
   g_strfreev(split_option);
 }
@@ -1451,7 +1461,7 @@ static void m_log(MYSQL *conn, void log_fun_1(const char *, ...), void log_fun_2
 }
 
 static gboolean m_queryv(  MYSQL *conn, const gchar *query, void log_fun_1(const char *, ...), void log_fun_2(const char *, ...), const char *fmt, va_list args){
-  if (mysql_query(conn, query)){
+  if (!dry_run && mysql_query(conn, query)){
     m_log(conn, log_fun_1, log_fun_2, fmt, args);
     return TRUE;
   }
@@ -1505,7 +1515,7 @@ gboolean m_query_verbose(MYSQL *conn, const char *q, void log_fun(const char *, 
 }
 
 MYSQL_RES *m_resultv(MYSQL_RES * m_result(MYSQL *), MYSQL *conn, const gchar *query, void log_fun_1(const char *, ...), void log_fun_2(const char *, ...), const char *fmt, va_list args){
-  if (m_queryv(conn, query, log_fun_1, log_fun_2, fmt, args))
+  if (dry_run || m_queryv(conn, query, log_fun_1, log_fun_2, fmt, args))
     return NULL;
 
   MYSQL_RES *res = m_result(conn);
@@ -1529,6 +1539,24 @@ MYSQL_RES *m_store_result(MYSQL *conn, const gchar *query, void log_fun(const ch
   va_end(args);
   return result;
 }
+
+MYSQL_RES *m_store_result_free_query(MYSQL *conn, gchar *query, void log_fun(const char *, ...) , const char *fmt, ...){
+  va_list args;
+  va_start(args, fmt);
+  MYSQL_RES *result = m_resultv(mysql_store_result, conn, query, log_fun, NULL, fmt, args);
+  va_end(args);
+  g_free(query);
+  return result;
+}
+
+MYSQL_RES *m_store_result_gstring(MYSQL *conn, GString *query, void log_fun(const char *, ...) , const char *fmt, ...){
+  va_list args;
+  va_start(args, fmt);
+  MYSQL_RES *result = m_resultv(mysql_store_result, conn, query->str, log_fun, NULL, fmt, args);
+  va_end(args);
+  return result;
+}
+
 
 MYSQL_RES *m_use_result(MYSQL *conn, const gchar *query, void log_fun(const char *, ...) , const char *fmt, ...){
   va_list args;

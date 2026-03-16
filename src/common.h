@@ -73,7 +73,7 @@ extern guint throttle_max_usleep_limit;
 void initialize_zstd_cmd();
 void initialize_gzip_cmd();
 
-struct object_to_export{
+struct object_scope{
   gboolean no_data;
   gboolean no_schema;
   gboolean no_view;
@@ -91,6 +91,7 @@ struct configuration_per_table{
   GHashTable *all_columns_on_select_replace_per_table;
   GHashTable *all_columns_on_insert_per_table;
   GHashTable *all_object_to_export;
+  GHashTable *all_object_to_import;
   GHashTable *all_partition_regex_per_table;
   GHashTable *all_rows_per_table;
 };
@@ -213,7 +214,7 @@ extern guint g_get_num_processors (void);
 char *show_warnings_if_possible(MYSQL *conn);
 int global_process_create_table_statement (gchar * statement, GString *create_table_statement, GString *alter_table_statement, GString *alter_table_constraint_statement, gchar *real_table, gboolean split_indexes);
 void initialize_conf_per_table(struct configuration_per_table *cpt);
-void parse_object_to_export(struct object_to_export *object_to_export,gchar *val);
+void parse_object_scope(struct object_scope *object_to_export,gchar *val);
 gchar *build_dbt_key(gchar *a, gchar *b);
 gchar *build_config_file_dbt_key(const gchar *a, const gchar *b);
 void discard_mysql_output(MYSQL *conn);
@@ -222,6 +223,8 @@ gboolean m_query_verbose(MYSQL *conn, const char *q, void log_fun(const char *, 
 gboolean m_query_warning(  MYSQL *conn, const gchar *query, const char *fmt, ...);
 gboolean m_query_critical( MYSQL *conn, const gchar *query, const char *fmt, ...);
 MYSQL_RES *m_store_result(MYSQL *conn, const gchar *query, void log_fun(const char *, ...) , const char *fmt, ...);
+MYSQL_RES *m_store_result_free_query(MYSQL *conn, gchar *query, void log_fun(const char *, ...) , const char *fmt, ...);
+MYSQL_RES *m_store_result_gstring(MYSQL *conn, GString *query, void log_fun(const char *, ...) , const char *fmt, ...);
 MYSQL_RES *m_store_result_critical(MYSQL *conn, const gchar *query, const char *fmt, ...);
 MYSQL_RES *m_use_result(MYSQL *conn, const gchar *query, void log_fun(const char *, ...) , const char *fmt, ...);
 struct M_ROW* m_store_result_row(MYSQL *conn, const gchar *query, void log_fun_1(const char *, ...), void log_fun_2(const char *, ...), const char *fmt, ...);

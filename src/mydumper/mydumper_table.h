@@ -34,7 +34,7 @@ struct db_table {
   char *escaped_table;
   char *min;
   char *max;
-  struct object_to_export object_to_export;
+  struct object_scope object_to_export;
   GString *select_fields;
   gboolean complete_insert;
   GString *insert_statement;
@@ -58,6 +58,7 @@ struct db_table {
   guint num_threads;
   GList *chunks;
   GMutex *chunks_mutex;
+  GMutex *write_mutex;
   GAsyncQueue *chunks_queue;
   GList *primary_key;
   gchar *primary_key_separated_by_comma;

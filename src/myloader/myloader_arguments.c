@@ -29,6 +29,7 @@ gchar *optimize_keys_str=NULL;
 gchar *checksum_str=NULL;
 gboolean set_gtid_purge = FALSE;
 gchar *fifo_directory = NULL;
+gchar *load_data_tmp_directory=NULL;
 gboolean show_warnings=FALSE;
 GList *ignore_set_list=NULL;
 gboolean mysqldump = FALSE;
@@ -129,7 +130,7 @@ gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointe
     return TRUE;
   } else if (!g_strcmp0(option_name, "--enable-binlog") || !g_strcmp0(option_name, "-e")){
     m_warning("Option --enable-binlog / -e is discouraged. Use [myloader_session_variables] in the --defaults-file or --defaults-extra-file instead");
-    return FALSE;
+    return TRUE;
   }
   
   return common_arguments_callback(option_name, value, data, error);
@@ -143,7 +144,9 @@ static GOptionEntry entries[] = {
     {"logfile", 'L', 0, G_OPTION_ARG_FILENAME, &logfile,
      "Log file name to use, by default stdout is used", NULL},
     {"fifodir", 0, 0, G_OPTION_ARG_FILENAME, &fifo_directory,
-     "Directory where the FIFO files will be created when needed. Default: Same as backup", NULL},
+     "Directory where the FIFO files will be created when needed. Default: temporary directoy will be created", NULL},
+    {"load-data-tmp-dir", 0, 0, G_OPTION_ARG_FILENAME, &load_data_tmp_directory,
+     "Directory where the FIFO temporary files will be created when needed for LOAD DATA statements. Default: temporary directoy will be created", NULL},
     {"database", 'B', 0, G_OPTION_ARG_STRING, &target_db,
      "An alternative database to restore into", NULL},
     {"show-warnings", 0,0, G_OPTION_ARG_NONE, &show_warnings, 
@@ -217,7 +220,8 @@ static GOptionEntry execution_entries[] = {
       "This means --max-threads-for-schema-creation=1. This option will be removed in future releases",NULL},
     {"stream", 0, G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK , &stream_arguments_callback,
       "It will receive the stream from STDIN and create the file in the disk before start processing. "
-      "Since v0.12.7-1, accepts NO_DELETE, NO_STREAM_AND_NO_DELETE and TRADITIONAL which is the default value and used if no parameter is given and also NO_STREAM since v0.16.3-1", NULL},
+      "Accepts NO_STREAM, NO_DELETE, NO_STREAM_AND_NO_DELETE, UNPACK and TRADITIONAL "
+      "which is the default value and used if no parameter is given", NULL},
     {"metadata-refresh-interval", 0, 0, G_OPTION_ARG_INT, &refresh_table_list_interval, 
       "Every this amount of tables the internal metadata will be refreshed. "
       "If the amount of tables you have in your metadata file is high, then you should increase this value. Default: 100", NULL},
