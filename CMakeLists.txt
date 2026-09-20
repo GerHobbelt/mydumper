@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 2.8.12)
+cmake_minimum_required(VERSION 2.8.12...3.5)
 project(mydumper)
 file(READ "VERSION" ver_str)
 string(REGEX MATCH "ver=\"([^\"]+)\"" _ ${ver_str})
@@ -45,7 +45,7 @@ if (MARIADB_FOUND AND NOT MARIADB_SSL AND WITH_SSL)
 endif()
 
 set(CMAKE_C_FLAGS "-std=gnu99 -Wall -Wno-deprecated-declarations -Wunused -Wwrite-strings -Wno-strict-aliasing -Wextra -Wshadow -g -Werror ${MYSQL_CFLAGS}")
-include_directories(${MYDUMPER_SOURCE_DIR} ${MYSQL_INCLUDE_DIR} ${GLIB2_INCLUDE_DIR} ${PCRE2_INCLUDE_DIR} ${ZLIB_INCLUDE_DIRS} )
+include_directories(${CMAKE_SOURCE_DIR}/src ${MYSQL_INCLUDE_DIR} ${GLIB2_INCLUDE_DIR} ${PCRE2_INCLUDE_DIR} ${ZLIB_INCLUDE_DIRS} )
 
 OPTION(WITH_ASAN "Build with ASAN" OFF)
 OPTION(WITH_TSAN "Build with TSAN" OFF)
@@ -80,7 +80,7 @@ MARK_AS_ADVANCED(CMAKE)
 
 CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_SOURCE_DIR}/src/config.h )
 SET( SHARED_SRCS src/server_detect.c src/connection.c src/logging.c src/set_verbose.c src/common.c src/tables_skiplist.c src/tables_includelist.c src/regex.c src/common_options.c src/pmm_thread.c src/checksum.c )
-SET( MYDUMPER_SRCS src/mydumper/mydumper.c ${SHARED_SRCS} src/mydumper/mydumper_pmm.c src/mydumper/mydumper_start_dump.c src/mydumper/mydumper_jobs.c src/mydumper/mydumper_common.c src/mydumper/mydumper_stream.c src/mydumper/mydumper_database.c src/mydumper/mydumper_table.c src/mydumper/mydumper_working_thread.c src/mydumper/mydumper_daemon_thread.c src/mydumper/mydumper_exec_command.c src/mydumper/mydumper_masquerade.c src/mydumper/mydumper_chunks.c src/mydumper/mydumper_write.c src/mydumper/mydumper_arguments.c src/mydumper/mydumper_integer_chunks.c src/mydumper/mydumper_string_chunks.c src/mydumper/mydumper_partition_chunks.c src/mydumper/mydumper_file_handler.c src/mydumper/mydumper_create_jobs.c )
+SET( MYDUMPER_SRCS src/mydumper/mydumper.c ${SHARED_SRCS} src/mydumper/mydumper_pmm.c src/mydumper/mydumper_start_dump.c src/mydumper/mydumper_jobs.c src/mydumper/mydumper_common.c src/mydumper/mydumper_stream.c src/mydumper/mydumper_database.c src/mydumper/mydumper_table.c src/mydumper/mydumper_working_thread.c src/mydumper/mydumper_daemon_thread.c src/mydumper/mydumper_exec_command.c src/mydumper/mydumper_masquerade.c src/mydumper/mydumper_chunks.c src/mydumper/mydumper_write.c src/mydumper/mydumper_escape.c src/mydumper/mydumper_arguments.c src/mydumper/mydumper_integer_chunks.c src/mydumper/mydumper_string_chunks.c src/mydumper/mydumper_partition_chunks.c src/mydumper/mydumper_file_handler.c src/mydumper/mydumper_create_jobs.c )
 SET( MYLOADER_SRCS src/myloader/myloader.c ${SHARED_SRCS} src/myloader/myloader_pmm.c src/myloader/myloader_stream.c src/myloader/myloader_stream.c src/myloader/myloader_process.c src/myloader/myloader_common.c src/myloader/myloader_directory.c src/myloader/myloader_restore.c src/myloader/myloader_restore_job.c src/myloader/myloader_control_job.c src/myloader/myloader_process_filename.c src/myloader/myloader_process_file_type.c src/myloader/myloader_arguments.c src/myloader/myloader_worker_index.c src/myloader/myloader_worker_schema.c src/myloader/myloader_worker_loader.c src/myloader/myloader_worker_post.c src/myloader/myloader_database.c src/myloader/myloader_worker_loader_main.c src/myloader/myloader_table.c)
 
 add_executable(mydumper ${MYDUMPER_SRCS})
@@ -131,6 +131,16 @@ target_link_libraries(test_use_defer_livelock ${GLIB2_LIBRARIES})
 # -DUSE_DEFER_FIX tells the test to exercise the fixed JOB_DEFER handler path.
 target_compile_definitions(test_use_defer_livelock PRIVATE USE_DEFER_FIX)
 add_test(NAME use_defer_livelock COMMAND test_use_defer_livelock)
+
+# Unit test: myloader --stream buffer carry-over (issue #1687)
+# Links the real process_stream() and drives it over hand-built streams, so it
+# reaches all four carry-over sites, including the two on the --mysqldump path
+# that cannot be reached end to end. Needs GLib, and the MySQL headers to
+# compile myloader_stream.c -- it calls nothing from the client library, so
+# there is no server and no libmysqlclient at run time.
+add_executable(test_stream_carryover test/unit/test_stream_carryover.c src/myloader/myloader_stream.c)
+target_link_libraries(test_stream_carryover ${GLIB2_LIBRARIES} ${GTHREAD2_LIBRARIES})
+add_test(NAME stream_carryover COMMAND test_stream_carryover)
 
 IF(RUN_CPPCHECK)
   include(CppcheckTargets)
