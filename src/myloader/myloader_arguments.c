@@ -122,6 +122,7 @@ gboolean arguments_callback(const gchar *option_name,const gchar *value, gpointe
     return TRUE;
   } else if (!g_strcmp0(option_name, "--enable-binlog") || !g_strcmp0(option_name, "-e")){
     m_warning("Option --enable-binlog / -e is discouraged. Use [myloader_session_variables] in the --defaults-file or --defaults-extra-file instead");
+    enable_binlog=TRUE;
     return TRUE;
   }
   
@@ -185,7 +186,7 @@ static GOptionEntry execution_entries[] = {
       "Options: AFTER_IMPORT_PER_TABLE, AFTER_IMPORT_ALL_TABLES and SKIP. Default: AFTER_IMPORT_PER_TABLE", NULL},
     {"optimize-keys-batchsize", 0, 0, G_OPTION_ARG_INT, &optimize_keys_batchsize,
       "Limits the amount of indexes per ALTER TABLE statement that adds the indexes, defaults: 0 (unlimited)", NULL},
-    {"no-schema", 0, 0, G_OPTION_ARG_NONE, &no_schemas, 
+    {"no-schemas", 0, 0, G_OPTION_ARG_NONE, &no_schemas, 
       "Do not import table schemas and triggers ", NULL},
     { "disable-redo-log", 0, 0, G_OPTION_ARG_NONE, &disable_redo_log,
       "Disables the REDO_LOG and enables it after, doesn't check initial status", NULL },
@@ -219,6 +220,10 @@ static GOptionEntry execution_entries[] = {
 static GOptionEntry filter_entries[] ={
     {"source-db", 's', 0, G_OPTION_ARG_STRING, &source_db,
      "Database to restore", NULL},
+    {"skip-create-table", 0, 0, G_OPTION_ARG_NONE, &skip_create_table,
+      "Do not execute the CREATE TABLE statement. By default, it executes the CREATE TABLE statement", NULL},
+    {"skip-create-database", 0, 0, G_OPTION_ARG_NONE, &skip_create_database,
+      "Do not execute any CREATE DATABASE statement, when -schema-create.sql file is found or even when -B is used. By default, it executes the CREATE DATABASE statement", NULL},
     {"skip-triggers", 0, 0, G_OPTION_ARG_NONE, &skip_triggers,
       "Do not import triggers. By default, it imports triggers", NULL},
     {"skip-post", 0, 0, G_OPTION_ARG_NONE, &skip_post,

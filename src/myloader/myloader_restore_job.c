@@ -335,7 +335,7 @@ int process_restore_job(struct thread_data *td, struct restore_job *rj){
     case JOB_TO_CREATE_TABLE:
 
       dbt->schema_state=CREATING;
-      if ((!source_db || g_strcmp0(dbt->database->source_database,source_db)==0) && !no_schemas && !dbt->object_to_import.no_schema ){
+      if ((!source_db || g_strcmp0(dbt->database->source_database,source_db)==0) && !no_schemas && !skip_create_table && !dbt->object_to_import.no_schema){
         if (max_threads_for_schema_creation==1) g_mutex_lock(single_threaded_create_table);
         if (machine_log_json) {
           gchar *thread_id = g_strdup_printf("%u", td->thread_id);
@@ -524,7 +524,7 @@ int process_restore_job(struct thread_data *td, struct restore_job *rj){
       if (!source_db || g_strcmp0(rj->data.srj->database->source_database,source_db)==0){
         if ( !no_schemas && (
              (rj->data.srj->object==TABLESPACE) ||
-             (rj->data.srj->object==CREATE_DATABASE) ||
+             (rj->data.srj->object==CREATE_DATABASE && !skip_create_database ) ||
              (rj->data.srj->object==VIEW && !dbt->object_to_import.no_view ) ||
              (rj->data.srj->object==SEQUENCE) ||
              (rj->data.srj->object==TRIGGER) ||
@@ -626,7 +626,7 @@ int process_restore_job(struct thread_data *td, struct restore_job *rj){
 
           if ( rj->data.srj->object == CREATE_DATABASE)
             rj->data.srj->database->schema_state = CREATED;
-        } else if (no_schemas && rj->data.srj->object == CREATE_DATABASE) {
+        } else if ((no_schemas || skip_create_database) && rj->data.srj->object == CREATE_DATABASE) {
           // In --no-schema mode, skip SQL execution but still mark database as CREATED
           // so data loading can proceed
           rj->data.srj->database->schema_state = CREATED;

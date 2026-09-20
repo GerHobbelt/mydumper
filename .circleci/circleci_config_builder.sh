@@ -480,6 +480,9 @@ cat <<EOF
           source /etc/profile.d/sh.local || true
     - run: cmake . <<parameters.CMAKED>>
     - run: make VERBOSE=1
+    - run:
+        name: Run unit tests
+        command: ctest --output-on-failure
     - run: sudo make install
     - run: ./mydumper --version
 
@@ -512,8 +515,8 @@ cat <<EOF
     - run:
         command: |
           if [ -z \${CIRCLE_TAG+x} ] ; then echo 'export CIRCLE_TAG="v0.11.1"' >> "\$BASH_ENV"; fi
-          echo 'export MYDUMPER_VERSION=\${CIRCLE_TAG:1} ' >> "\$BASH_ENV"
-          echo 'export MYDUMPER_REVISION=1 ' >> "\$BASH_ENV"
+          echo 'export MYDUMPER_VERSION=\$(  echo "\${CIRCLE_TAG:1}" | cut -d'-' -f1 ) ' >> "\$BASH_ENV"
+          echo 'export MYDUMPER_REVISION=\$(  echo "\${CIRCLE_TAG:1}" | cut -d'-' -f2 ) ' >> "\$BASH_ENV"
           cat /etc/profile.d/sh.local >> "\$BASH_ENV" || true
           cat \$BASH_ENV
           source "\$BASH_ENV"
@@ -711,6 +714,7 @@ echo -n '
     docker:
       - image: mydumper/mydumper-builder-noble
     steps:
+	- run: sudo apt update
     - run: sudo apt install -y git dpkg-dev apt-utils createrepo-c rpm reprepro
     - attach_workspace:
         at: /tmp/package    

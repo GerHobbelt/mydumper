@@ -1,4 +1,3 @@
 [myloader]
-threads=4
-no-schemas
 directory=/tmp/data
+skip-create-database=1
