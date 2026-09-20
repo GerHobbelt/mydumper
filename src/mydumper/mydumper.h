@@ -35,4 +35,6 @@
 #include "tables_skiplist.h"
 #include "logging.h"
 
+void print_defaults_arguments();
+
 #endif

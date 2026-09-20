@@ -18,12 +18,12 @@
 #ifndef _src_myloader_myloader_common_h
 #define _src_myloader_myloader_common_h
 
-#include <stdio.h>
 #include <glib.h>
 #include <mysql.h>
+#include <stdio.h>
 
-#include "myloader/myloader_deps.h"
 #include "myloader/myloader.h"
+#include "myloader/myloader_deps.h"
 
 struct db_table;
 struct database;
@@ -48,7 +48,7 @@ gboolean get_command_and_basename(gchar *filename, gchar ***command, gchar **bas
 gboolean m_filename_has_suffix(gchar const *str, gchar const *suffix);
 void     initialize_thread_data(struct thread_data *td, struct configuration *conf, enum thread_states status, guint thread_id, struct db_table *dbt);
 gboolean is_in_ignore_set_list(gchar *haystack);
-void     remove_ignore_set_session_from_hash();
+void     remove_ignore_set_session_from_hash(GHashTable *set_session_hash);
 void     execute_replication_commands(MYSQL *conn, gchar *statement, const gchar *message);
 gboolean should_ignore_set_statement(GString *data);
 #endif

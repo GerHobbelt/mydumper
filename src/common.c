@@ -1127,6 +1127,9 @@ void check_num_threads()
     g_warning("Invalid number of threads %d, setting to %d", num_threads, MIN_THREAD_COUNT);
     num_threads = MIN_THREAD_COUNT;
   }
+
+  if (!max_threads_per_table)
+    max_threads_per_table = num_threads;
 }
 
 static void emit_runtime_log_event(GLogLevelFlags level, const gchar *event, const gchar *status, const gchar *source_api, const gchar *message)
@@ -1828,7 +1831,7 @@ gchar *build_config_file_dbt_key(const gchar *a, const gchar *b)
 void discard_mysql_output(MYSQL *conn)
 {
   MYSQL_RES *result = NULL;
-  MYSQL_ROW row = NULL;
+  MYSQL_ROW  row = NULL;
 
   if (mysql_field_count(conn) > 0)
   {
@@ -1847,17 +1850,23 @@ void discard_mysql_output(MYSQL *conn)
     }
   }
 
-  while (mysql_more_results(conn)) {
+  while (mysql_more_results(conn))
+  {
     if (mysql_next_result(conn) != 0)
       return;
-    if (mysql_field_count(conn) > 0) {
+    if (mysql_field_count(conn) > 0)
+    {
       result = mysql_store_result(conn);
-      if (result != NULL) {
-        while ((row = mysql_fetch_row(result))) {
+      if (result != NULL)
+      {
+        while ((row = mysql_fetch_row(result)))
+        {
           (void)row;
         }
         mysql_free_result(result);
-      } else if (mysql_errno(conn) != 0) {
+      }
+      else if (mysql_errno(conn) != 0)
+      {
         return;
       }
     }

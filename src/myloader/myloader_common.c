@@ -113,7 +113,7 @@ gboolean is_in_ignore_set_list(gchar *haystack)
   return is_in_list(haystack, ignore_set_list);
 }
 
-void remove_ignore_set_session_from_hash()
+void remove_ignore_set_session_from_hash(GHashTable *set_session_hash)
 {
   GList *l = ignore_set_list;
   while (l)
@@ -560,6 +560,10 @@ static gboolean get_database_table_from_filename_for_filter(const gchar *filenam
   else if (m_filename_has_suffix(filename, "-schema.sql"))
   {
     get_database_table_from_file(filename, "-schema", database, table);
+  }
+  else if (m_filename_has_suffix(filename, "-schema-create.sql"))
+  {
+    get_database_table_from_file(filename, "-schema-create", database, table);
   }
   else if (m_filename_has_suffix(filename, ".sql") || m_filename_has_suffix(filename, ".dat"))
   {

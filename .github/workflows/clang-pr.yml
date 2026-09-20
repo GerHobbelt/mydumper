@@ -1,12 +1,7 @@
 name: Format
 description: On pull requests, execute format checks
 
-on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - 'src/**'
+on: [pull_request]
 
 jobs:
   clang-format:

@@ -29,34 +29,34 @@
 #include "mydumper/mydumper_global.h"
 #include "mydumper/mydumper_string_planner_utils.h"
 
-extern guint64             min_integer_chunk_step_size;
-extern guint64             max_integer_chunk_step_size;
-guint                      max_split_of_step_in_integer_chunk = 0;
-guint                      max_char_size = 2;
-guint                      max_items_per_string_chunk = 5;
-guint                      max_time_per_select = MAX_TIME_PER_SELECT;
-enum sync_thread_lock_mode sync_thread_lock_mode = AUTO;
-const gchar               *compress_method = NULL;
-gboolean                   split_integer_tables = TRUE;
-const gchar               *rows_file_extension = SQL;
-enum output_format         output_format = SQL_INSERT;
-gchar                     *output_directory_str = NULL;
-gboolean                   masquerade_filename = FALSE;
-guint                      trx_tables = 1;
-gboolean                   use_single_column = FALSE;
-gboolean                   split_string_pk = FALSE;
-gboolean                   string_pk_planner_metadata_enabled = TRUE;
-guint                      string_pk_planner_timeout_seconds = 30;
-guint                      string_pk_planner_max_probes = 64;
-guint                      string_pk_planner_max_prefixes = 256;
-guint64                    string_pk_planner_min_rows = 1000000;
-guint64                    string_pk_planner_target_rows_per_prefix = 0;
-gchar                     *string_pk_planner_strategy_str = NULL;
-enum                       string_pk_planner_strategy string_pk_planner_strategy = STRING_PK_PLANNER_AUTO;
-const gchar               *table_engine_for_view_dependency = MEMORY;
-guint                      ftwrl_max_wait_time = 60;
-guint                      ftwrl_timeout_retries = 0;
-gchar                     *load_data_character_set = NULL;
+extern guint64                  min_integer_chunk_step_size;
+extern guint64                  max_integer_chunk_step_size;
+guint                           max_split_of_step_in_integer_chunk = 0;
+guint                           max_char_size = 2;
+guint                           max_items_per_string_chunk = 5;
+guint                           max_time_per_select = MAX_TIME_PER_SELECT;
+enum sync_thread_lock_mode      sync_thread_lock_mode = AUTO;
+const gchar                    *compress_method = NULL;
+gboolean                        split_integer_tables = TRUE;
+const gchar                    *rows_file_extension = SQL;
+enum output_format              output_format = SQL_INSERT;
+gchar                          *output_directory_str = NULL;
+gboolean                        masquerade_filename = FALSE;
+guint                           trx_tables = 1;
+gboolean                        use_single_column = FALSE;
+gboolean                        split_string_pk = FALSE;
+gboolean                        string_pk_planner_metadata_enabled = TRUE;
+guint                           string_pk_planner_timeout_seconds = 30;
+guint                           string_pk_planner_max_probes = 64;
+guint                           string_pk_planner_max_prefixes = 256;
+guint64                         string_pk_planner_min_rows = 1000000;
+guint64                         string_pk_planner_target_rows_per_prefix = 0;
+gchar                          *string_pk_planner_strategy_str = NULL;
+enum string_pk_planner_strategy string_pk_planner_strategy = STRING_PK_PLANNER_AUTO;
+const gchar                    *table_engine_for_view_dependency = MEMORY;
+guint                           ftwrl_max_wait_time = 60;
+guint                           ftwrl_timeout_retries = 0;
+gchar                          *load_data_character_set = NULL;
 
 gboolean arguments_callback(const gchar *option_name, const gchar *value, gpointer data, GError **error)
 {
@@ -271,7 +271,6 @@ gboolean arguments_callback(const gchar *option_name, const gchar *value, gpoint
 }
 
 static GOptionEntry entries[] = {
-    {"help", '?', 0, G_OPTION_ARG_NONE, &help, "Show help options", NULL},
     {"outputdir", 'o', 0, G_OPTION_ARG_FILENAME, &output_directory_str,
         "Directory to output files to", NULL},
     {"clear", 0, 0, G_OPTION_ARG_NONE, &clear_dumpdir,
@@ -388,7 +387,7 @@ static GOptionEntry chunks_entries[] = {
     {"max-time-per-select", 0, 0, G_OPTION_ARG_INT, &max_time_per_select,
         "Maximum amount of seconds that a select should take. Default: 2", NULL},
     {"max-threads-per-table", 0, 0, G_OPTION_ARG_INT, &max_threads_per_table,
-        "Maximum number of threads per table to use", NULL},
+        "Maximum number of threads per table to use, defaults to --threads", NULL},
     {"use-single-column", 0, 0, G_OPTION_ARG_NONE, &use_single_column,
         "It will ignore if the table has multiple columns and use only the first column to split the table", NULL},
     {"split-string-pk", 0, 0, G_OPTION_ARG_NONE, &split_string_pk,
@@ -539,6 +538,7 @@ GOptionContext *load_contex_entries()
 
   GOptionGroup *main_group =
       g_option_group_new("main", "Main Options", "Main Options", NULL, NULL);
+  g_option_group_add_entries(main_group, first_common_entries);
   g_option_group_add_entries(main_group, entries);
   g_option_group_add_entries(main_group, common_entries);
 
