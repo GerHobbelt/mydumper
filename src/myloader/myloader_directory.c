@@ -82,11 +82,11 @@ void *process_directory(struct configuration *conf){
   }else{
     GDir *dir = g_dir_open(directory, 0, &error);
     while ((filename = g_dir_read_name(dir))){
-      if (strcmp(filename, "metadata"))
+      if (should_queue_filename(filename, conf->table_list_mutex))
         process_filename_push(filename);
     }
+    g_dir_close(dir);
   }
   process_filename_queue_end();
   return NULL;
 }
-

@@ -348,40 +348,13 @@ void append_columns (GString *statement, MYSQL_FIELD *fields, guint num_fields){
 
   }
 }
-/*
-static
-void set_anonymized_function_list(struct db_table * dbt, MYSQL_FIELD *fields, guint num_fields){
-  gchar *database=dbt->database->source_database;
-  gchar *table=dbt->table;
-
-  gchar * k = g_strdup_printf("`%s`.`%s`",database,table);
-  GHashTable *ht = g_hash_table_lookup(conf_per_table.all_anonymized_function,k);
-  g_free(k);
-  struct function_pointer ** anonymized_function_list=NULL;
-
-  if (ht){
-    anonymized_function_list = g_new0(struct function_pointer *, num_fields);
-    guint i = 0;
-    struct function_pointer *fp=NULL;
-    for (i = 0; i < num_fields; ++i) {
-      fp=(struct function_pointer*)g_hash_table_lookup(ht,fields[i].name);
-      if (fp != NULL){
-        g_message("Masquerade function found on `%s`.`%s`.`%s`", database, table, fields[i].name);
-        anonymized_function_list[i]=fp;
-      }else{
-        anonymized_function_list[i]=&identity_function_pointer;
-      }
-    }
-    dbt->anonymized_function=anonymized_function_list;
-  }
-}
-*/
 
 static
 void set_anonymized_function_hash(struct db_table * dbt){
   // It is correct to use backticks in this case, as we are using the config file, not the identifier_quote_character:
   gchar * k = g_strdup_printf("`%s`.`%s`",dbt->database->source_database,dbt->table);
-  dbt->anonymized_function = g_hash_table_lookup(conf_per_table.all_anonymized_function,k);
+  GHashTable *local_conf_per_table=g_hash_table_lookup(conf_per_table,ANONYMIZED_FUNCTION);
+  dbt->anonymized_function = local_conf_per_table?g_hash_table_lookup(local_conf_per_table,k):NULL;
   g_free(k);
 }
 
@@ -636,23 +609,47 @@ void write_column_into_string_with_terminated_by(MYSQL *conn, gchar * column_i, 
   gulong rlength=length;
   g_string_set_size(buffers.column,0);
   g_string_set_size(buffers.column_mask,0);
+
 //  if (row)
 //    column=row;
   if (f){
+    if (f->is_pre){
+      // apply and constant as they alter the data
+      write_column_into_string( conn, column, field, rlength, buffers);
+      trace("Buffer.column initial: %s with column: %s", buffers.column->str, column);
+      f->function(buffers.column_mask, buffers.column->str, &rlength, f);
+      trace("Buffer.column_mask changed: %s", buffers.column_mask->str);
+      g_string_assign(buffers.column,buffers.column_mask->str);
+      trace("Buffer.column final: %s", buffers.column->str);
+    }else{
+      trace("Buffer.column initial: %s with column: %s", buffers.column->str, column);
+      if (f->function(buffers.column_mask, column, &rlength, f))
+        write_column_into_string( conn, buffers.column_mask->str, field, buffers.column_mask->len, buffers);
+      else
+        write_column_into_string( conn, NULL, field, 0, buffers);
+      trace("Buffer.column final: %s and Buffer.column_mask: %s", buffers.column->str, buffers.column_mask->str);
+    }
+  
+    anonymized_function_list=anonymized_function_list->next;
+    f=anonymized_function_list?anonymized_function_list->data:NULL;
+    column=buffers.column->str;
     while (f){
       if (f->is_pre){
         // apply and constant as they alter the data
-        write_column_into_string( conn, column, field, rlength, buffers);
         trace("Buffer.column initial: %s with column: %s", buffers.column->str, column);
         f->function(buffers.column_mask, buffers.column->str, &rlength, f);
         trace("Buffer.column_mask changed: %s", buffers.column_mask->str);
         g_string_assign(buffers.column,buffers.column_mask->str);      
         trace("Buffer.column final: %s", buffers.column->str);
       }else{
-        if (f->function(buffers.column_mask, column, &rlength, f))
-          write_column_into_string( conn, buffers.column_mask->str, field, buffers.column_mask->len, buffers);
-        else
+        trace("Buffer.column initial: %s with column: %s", buffers.column->str, column);
+        if (f->function(buffers.column_mask, buffers.column->str, &rlength, f))
+          g_string_assign(buffers.column,buffers.column_mask->str);
+        else{
+          g_string_set_size(buffers.column,0);
           write_column_into_string( conn, NULL, field, 0, buffers);
+        }
+        trace("Buffer.column final: %s and Buffer.column_mask: %s", buffers.column->str, buffers.column_mask->str);
       }
       anonymized_function_list=anonymized_function_list->next;
       f=anonymized_function_list?anonymized_function_list->data:NULL;

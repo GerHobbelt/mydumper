@@ -62,7 +62,8 @@ GList *schema_post = NULL;
 gboolean it_is_a_consistent_backup = FALSE;
 GHashTable *all_dbts=NULL;
 char * (*identifier_quote_character_protect)(char *r);
-struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+//struct configuration_per_table conf_per_table = {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+GHashTable *conf_per_table=NULL;
 gboolean replica_stopped = FALSE;
 gboolean merge_dumpdir= FALSE;
 gboolean clear_dumpdir= FALSE;
@@ -88,8 +89,9 @@ void initialize_start_dump(){
   all_dbts=g_hash_table_new(g_str_hash, g_str_equal);
   initialize_table();
   initialize_working_thread();
-	initialize_conf_per_table(&conf_per_table);
-
+  initilize_checksum();
+//	initialize_conf_per_table(&conf_per_table);
+  conf_per_table=g_hash_table_new(g_str_hash, g_str_equal);
   // until we have an unique option on lock types we need to ensure this
   if (sync_thread_lock_mode==NO_LOCK || sync_thread_lock_mode==SAFE_NO_LOCK)
     trx_tables=TRUE;
@@ -180,12 +182,21 @@ void determine_columns_on_show_processlist( MYSQL_FIELD *fields, guint num_field
   }
 }
 
-void *monitor_ftwrl_thread (void *thread_id){
+static
+MYSQL *create_connection() {
   MYSQL *conn;
+  conn = mysql_init(NULL);
+
+  m_connect(conn);//, db_items!=NULL?db_items[0]:db);
+
+  execute_gstring(conn, set_session);
+  return conn;
+}
+
+void *monitor_ftwrl_thread (void *thread_id){
+  MYSQL *conn=create_connection();
   MYSQL_RES *res = NULL;
   gboolean ftwrl_found_in_processlist = FALSE;
-  conn = mysql_init(NULL);
-  m_connect(conn);
   gchar *query=NULL;
   while (!ftwrl_completed){
     if (ftwrl_found_in_processlist == TRUE) {
@@ -311,17 +322,6 @@ GHashTable * mydumper_initialize_hash_of_session_variables(){
 }
 
 static
-MYSQL *create_connection() {
-  MYSQL *conn;
-  conn = mysql_init(NULL);
-
-  m_connect(conn);//, db_items!=NULL?db_items[0]:db);
-
-  execute_gstring(conn, set_session);
-  return conn;
-}
-
-static
 void detect_quote_character(MYSQL *conn)
 {
   MYSQL_RES *res = m_store_result(conn, "SELECT FIND_IN_SET('ANSI', @@SQL_MODE) OR FIND_IN_SET('ANSI_QUOTES', @@SQL_MODE)", m_warning, "We were not able to determine ANSI mode",NULL);
@@ -408,7 +408,7 @@ MYSQL *create_main_connection(GOptionContext *context) {
   if (key_file != NULL ){
     load_hash_of_all_variables_perproduct_from_key_file(key_file,set_global_hash,"mydumper_global_variables");
     load_hash_of_all_variables_perproduct_from_key_file(key_file,set_session_hash,"mydumper_session_variables");
-    load_per_table_info_from_key_file(key_file, &conf_per_table, &init_function_pointer);
+    load_per_table_info_from_key_file(key_file, conf_per_table, &init_function_pointer);
   }
   sql_mode=g_strdup(g_hash_table_lookup(set_session_hash,"SQL_MODE"));
   if (!sql_mode){
@@ -705,14 +705,14 @@ void print_dbt_on_metadata_gstring(struct db_table *dbt, GString *data){
     g_string_append_printf(data,"is_sequence = 1\n");
   if (dbt->is_view)
     g_string_append_printf(data,"is_view = 1\n");
-  if (dbt->data_checksum)
-    g_string_append_printf(data,"data_checksum = %s\n", dbt->data_checksum);
-  if (dbt->schema_checksum)
-    g_string_append_printf(data,"schema_checksum = %s\n", dbt->schema_checksum);
-  if (dbt->indexes_checksum)
-    g_string_append_printf(data,"indexes_checksum = %s\n", dbt->indexes_checksum);
-  if (dbt->triggers_checksum)
-    g_string_append_printf(data,"triggers_checksum = %s\n", dbt->triggers_checksum);
+  if (dbt->checksum.data)
+    g_string_append_printf(data,"data_checksum = %s\n", dbt->checksum.data);
+  if (dbt->checksum.schema)
+    g_string_append_printf(data,"schema_checksum = %s\n", dbt->checksum.schema);
+  if (dbt->checksum.index)
+    g_string_append_printf(data,"indexes_checksum = %s\n", dbt->checksum.index);
+  if (dbt->checksum.trigger)
+    g_string_append_printf(data,"triggers_checksum = %s\n", dbt->checksum.trigger);
   g_mutex_unlock(dbt->chunks_mutex);
 }
 
@@ -1414,10 +1414,10 @@ void start_dump(struct configuration *conf, GOptionContext *context) {
   g_string_free(set_global_back, TRUE);
   g_strfreev(db_items);
 
-  g_hash_table_unref(conf_per_table.all_anonymized_function);
-  g_hash_table_unref(conf_per_table.all_where_per_table);
-  g_hash_table_unref(conf_per_table.all_limit_per_table);
-  g_hash_table_unref(conf_per_table.all_num_threads_per_table);
+//  g_hash_table_unref(conf_per_table.all_anonymized_function);
+//  g_hash_table_unref(conf_per_table.all_where_per_table);
+//  g_hash_table_unref(conf_per_table.all_limit_per_table);
+//  g_hash_table_unref(conf_per_table.all_num_threads_per_table);
 
   finalize_masquerade();
 
