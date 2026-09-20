@@ -333,11 +333,13 @@ commands:
           echo "mysql-apt-config mysql-apt-config/select-server string mysql-8.4-lts" | sudo debconf-set-selections
           sudo rm /usr/share/keyrings/mysql-apt-config.gpg
           echo "3" | DEBIAN_FRONTEND=noninteractive sudo dpkg-reconfigure mysql-apt-config
-          gpg --batch --yes --delete-keys BCA43417C3B485DD128EC6D4B7B3B788A8D3785C || true
-          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB7B3B788A8D3785C" -o /tmp/fresh.asc
-          gpg --import /tmp/fresh.asc
-          rm -f /usr/share/keyrings/mysql-apt-config.gpg
-          gpg --output /usr/share/keyrings/mysql-apt-config.gpg --export BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
+EOF
+#          gpg --batch --yes --delete-keys BCA43417C3B485DD128EC6D4B7B3B788A8D3785C || true
+#          curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB7B3B788A8D3785C" -o /tmp/fresh.asc
+#          gpg --import /tmp/fresh.asc
+#          rm -f /usr/share/keyrings/mysql-apt-config.gpg
+#          gpg --output /usr/share/keyrings/mysql-apt-config.gpg --export BCA43417C3B485DD128EC6D4B7B3B788A8D3785C
+cat <<EOF
           sudo apt-get update
           sudo apt-get install -y gdb screen time libmysqlclient24 libmysqlclient-dev mysql-client
 
@@ -491,6 +493,7 @@ cat <<EOF
     - when:
         condition: << parameters.test >>
         steps:
+        - run: bash ./test_mydumper.sh -c 34:50 --skip-dynamic -d SSL
         - run: bash ./test_mydumper.sh -d SSL
     - store_artifacts:
         path: /tmp/stream.sql
@@ -508,9 +511,9 @@ cat <<EOF
     steps:
     - run:
         command: |
-          if [ -z \${CIRCLE_TAG+x} ] ; then echo 'export CIRCLE_TAG="v0.11.1-1"' >> "\$BASH_ENV"; fi
-          echo 'export MYDUMPER_VERSION=\$(  echo "\${CIRCLE_TAG:1}" | cut -d'-' -f1 ) ' >> "\$BASH_ENV"
-          echo 'export MYDUMPER_REVISION=\$( echo "\${CIRCLE_TAG:1}" | cut -d'-' -f2 ) ' >> "\$BASH_ENV"
+          if [ -z \${CIRCLE_TAG+x} ] ; then echo 'export CIRCLE_TAG="v0.11.1"' >> "\$BASH_ENV"; fi
+          echo 'export MYDUMPER_VERSION=\${CIRCLE_TAG:1} ' >> "\$BASH_ENV"
+          echo 'export MYDUMPER_REVISION=1 ' >> "\$BASH_ENV"
           cat /etc/profile.d/sh.local >> "\$BASH_ENV" || true
           cat \$BASH_ENV
           source "\$BASH_ENV"
